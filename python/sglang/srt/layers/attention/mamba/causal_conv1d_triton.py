@@ -4,15 +4,46 @@
 # Adapted from https://github.com/Dao-AILab/causal-conv1d/blob/main/causal_conv1d/causal_conv1d_interface.py
 # and https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/mamba/ops/causal_conv1d.py
 
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import triton
 import triton.language as tl
 
 from sglang.jit_kernel.utils import is_arch_support_pdl
+from sglang.srt.utils import get_bool_env_var
 
 PAD_SLOT_ID = -1
+
+_ENABLE_CAUSAL_CONV1D_LONG_PREFILL_CONFIG = get_bool_env_var(
+    "SGLANG_CONV1D_CFG"
+)
+_CAUSAL_CONV1D_FWD_DEFAULT_CONFIG = (8, 256, 4)
+_CAUSAL_CONV1D_FWD_LONG_PREFILL_CONFIGS = (
+    # (minimum total tokens, BLOCK_M, BLOCK_N, num_warps)
+    (24576, 128, 1024, 2),
+    (6144, 64, 1024, 2),
+    (2048, 16, 512, 4),
+)
+
+
+def _select_causal_conv1d_fwd_config(
+    total_tokens: int, dim: int, enabled: bool
+) -> Tuple[int, int, int]:
+    """Select the validated HCU launch config for long GDN prefills.
+
+    Keep the upstream launch config unless the opt-in switch is enabled. A
+    candidate whose feature block is wider than ``dim`` is skipped so smaller
+    hidden dimensions can safely fall back to a narrower or default config.
+    """
+    if enabled:
+        for min_total_tokens, block_m, block_n, num_warps in (
+            _CAUSAL_CONV1D_FWD_LONG_PREFILL_CONFIGS
+        ):
+            if total_tokens >= min_total_tokens and block_n <= dim:
+                return block_m, block_n, num_warps
+
+    return _CAUSAL_CONV1D_FWD_DEFAULT_CONFIG
 
 
 @triton.jit()
@@ -444,6 +475,11 @@ def causal_conv1d_fn(
 
     is_channel_last = (x.stride(0) == 1) & (x.stride(1) > 1)
     dim, cu_seqlen = x.shape
+    block_m, block_n, num_warps = _select_causal_conv1d_fwd_config(
+        cu_seqlen,
+        dim,
+        enabled=_ENABLE_CAUSAL_CONV1D_LONG_PREFILL_CONFIG,
+    )
     _, width = weight.shape
     state_len = width - 1
     np2_statelen = triton.next_power_of_2(state_len)
@@ -549,8 +585,9 @@ def causal_conv1d_fn(
         USE_PAD_SLOT=pad_slot_id is not None,
         NP2_STATELEN=np2_statelen,
         # launch_cooperative_grid=True
-        BLOCK_M=8,
-        BLOCK_N=256,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        num_warps=num_warps,
         num_stages=2,
     )
     return out
