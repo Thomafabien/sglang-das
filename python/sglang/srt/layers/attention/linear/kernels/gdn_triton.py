@@ -53,6 +53,19 @@ elif is_xpu():
 
 from sglang.srt.utils import get_bool_env_var
 _use_decode_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
+_enable_aiter_gdn_config = get_bool_env_var("SGLANG_GDN_CFG")
+
+
+def _select_aiter_gdn_recurrent_config(
+    k, v, intermediate_states_buffer, enabled: bool
+):
+    if not enabled or intermediate_states_buffer is None:
+        return None
+    if k is None or v is None or k.dim() != 4 or v.dim() != 4:
+        return None
+    if (k.shape[2], v.shape[2]) != (4, 8):
+        return None
+    return {"BV": 8, "num_warps": 4}
 
 class TritonGDNKernel(LinearAttnKernelBase):
     """Triton-based kernel for GDN (Gated Delta Network) linear attention."""
@@ -257,6 +270,9 @@ class TritonGDNKernel(LinearAttnKernelBase):
                 retrieve_parent_token=retrieve_parent_token,
             )
         else:
+            kernel_cfg = _select_aiter_gdn_recurrent_config(
+                k, v, intermediate_states_buffer, enabled=_enable_aiter_gdn_config
+            )
             from aiter.ops.triton.fla.fused_sigmoid_gating_recurrent import fused_sigmoid_gating_delta_rule_update as aiter_fused_sigmoid_gating_delta_rule_update
             return aiter_fused_sigmoid_gating_delta_rule_update(
                 A_log=A_log,
@@ -279,4 +295,5 @@ class TritonGDNKernel(LinearAttnKernelBase):
                 intermediate_state_indices=intermediate_state_indices,
                 cache_steps=cache_steps,
                 retrieve_parent_token=retrieve_parent_token,
+                kernel_cfg=kernel_cfg,
             )

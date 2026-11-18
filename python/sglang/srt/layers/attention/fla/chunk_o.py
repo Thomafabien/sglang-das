@@ -18,6 +18,17 @@ from sglang.srt.layers.attention.fla.utils import check_shared_mem, is_nvidia_ho
 from sglang.srt.utils import get_bool_env_var
 
 _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
+_enable_gdn_nozero = get_bool_env_var("SGLANG_GDN_NOZERO")
+
+
+def _allocate_chunk_o_output(v: torch.Tensor, cu_seqlens) -> torch.Tensor:
+    if (
+        _enable_gdn_nozero
+        and _use_prefill_aiter_linear_attn
+        and cu_seqlens is not None
+    ):
+        return torch.empty_like(v)
+    return torch.zeros_like(v)
 
 BKV_LIST = [64, 128] if check_shared_mem() else [32, 64]
 NUM_WARPS = [2, 4] if is_nvidia_hopper else [2, 4, 8]
@@ -150,7 +161,7 @@ def chunk_fwd_o(
     if scale is None:
         scale = k.shape[-1] ** -0.5
 
-    o = torch.zeros_like(v)
+    o = _allocate_chunk_o_output(v, cu_seqlens)
 
     def grid(meta):
         return (triton.cdiv(V, meta["BV"]), NT, B * H)

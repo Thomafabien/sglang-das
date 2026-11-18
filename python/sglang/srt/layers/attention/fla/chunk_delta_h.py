@@ -33,6 +33,20 @@ from sglang.srt.utils import get_bool_env_var, is_hcu
 
 _is_hcu = is_hcu()
 _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
+_enable_aiter_chunk_h_config = get_bool_env_var("SGLANG_CHUNK_H_CFG")
+
+
+def _select_aiter_chunk_h_config(
+    K: int, V: int, BT: int, H: int, enabled: bool
+):
+    """Select the validated gfx928 config for the production Qwen3.6 shape."""
+    if not enabled or (K, V, BT, H) != (128, 128, 64, 8):
+        return None
+    return {
+        "BV": int(os.getenv("SGLANG_CHUNK_H_BV", "16")),
+        "num_warps": int(os.getenv("SGLANG_CHUNK_H_WARPS", "4")),
+        "num_stages": int(os.getenv("SGLANG_CHUNK_H_STAGES", "2")),
+    }
 
 
 @triton.autotune(
@@ -365,6 +379,9 @@ def chunk_gated_delta_rule_fwd_h(
             NT_BUCKET=(0 if NT <= 32 else (1 if NT <= 128 else 2)),
         )
     else:
+        kernel_cfg = _select_aiter_chunk_h_config(
+            K, V, BT, H, enabled=_enable_aiter_chunk_h_config
+        )
         from aiter.ops.triton.fla.sglang.chunk_delta_h import (
             launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64,
         )
@@ -388,6 +405,6 @@ def chunk_gated_delta_rule_fwd_h(
             K=K,
             V=V,
             BT=BT,
-            kernel_cfg=None,
+            kernel_cfg=kernel_cfg,
         )
     return h, v_new
