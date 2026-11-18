@@ -3,6 +3,7 @@
 本目录配合 `python/sglang/srt/hcu_optim` 提供 K100_AI 优化的配置、启动、验证和复现材料。优化已进入 SGLang 源码包，不再依赖 `sitecustomize.py` 或外置 `PYTHONPATH` patch。
 
 - 完整合入说明：`SOURCE_INTEGRATION.md`
+- 节点 86 验证结果：`VALIDATION_86.md`
 - 手工复现步骤：`MANUAL_REPRO.md`
 - 源码集成自检：`verify_source_integration.py`
 - Conv1D+GDN+MoE：`start_gdn_moe_server.sh`
