@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import sys
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from sglang.srt.arg_groups.arg_utils import resolvable_fields
@@ -2199,3 +2200,8 @@ def _hrm_text_attention_force(view: Any) -> dict:
             "attention."
         )
     return {"attention_backend": "triton"}
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

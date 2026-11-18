@@ -1,36 +1,13 @@
-# Qwen3.6 K100_AI incremental optimizations
+# Qwen3.6 K100_AI source-integrated optimizations
 
-This directory contains the K100_AI MoE runtime layer and the tuned MoE
-configurations used together with the Conv1D and GDN source integrations on
-branch `feat/qwen36-k100ai-opt`.
+本目录配合 `python/sglang/srt/hcu_optim` 提供 K100_AI 优化的配置、启动、验证和复现材料。优化已进入 SGLang 源码包，不再依赖 `sitecustomize.py` 或外置 `PYTHONPATH` patch。
 
-## Start the verified GDN + MoE profile
+- 完整合入说明：`SOURCE_INTEGRATION.md`
+- 手工复现步骤：`MANUAL_REPRO.md`
+- 源码集成自检：`verify_source_integration.py`
+- Conv1D+GDN+MoE：`start_gdn_moe_server.sh`
+- 全模块候选组合：`start_all_optimizations.sh`
+- 性能/正确性脚本：`bench/`
+- MoE 与 TunableOp 配置：`config/`
 
-Inside the model container:
-
-```bash
-cd /workspace/sglang-das-k100opt
-GPU_DEVICES=4,5,6,7 \
-MODEL_PATH=/model/Qwen3.6-35B-A3B \
-PORT=30010 \
-bash k100opt/start_gdn_moe_server.sh \
-  > /workspace/k100opt/results/gdn4-moe-manual/service.log 2>&1
-```
-
-The MoE layer is isolated under `k100opt/patch`.  It is loaded only because the
-start script puts that directory before `python/` on `PYTHONPATH` and explicitly
-enables the four MoE switches.  A normal SGLang launch from this branch does not
-enable the runtime patches.
-
-## Effective-code checks
-
-After the service is ready, the service log must contain all of the following:
-
-- `Using MoE kernel config from ...device_name=K100_AI.json`
-- `[fast_moe_align] 守卫判定 EP 已关闭 = True`
-- `[moe_pack_w13] ✅ 首次真正生效`
-- `[act_flat] 生效·新形状` after a large-prefill request
-
-`m3_fuse` is intentionally excluded because its target is `qwen2_moe`.
-`safe_align` is intentionally excluded because it belongs to the later
-pair-prefill scheduling integration.
+所有一级优化开关默认关闭。直接运行原 SGLang 启动命令得到 clean 路径；使用上述启动脚本才会显式开启相应优化。

@@ -32,6 +32,7 @@ import gc
 import logging
 import os
 import pickle
+import sys
 import weakref
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
@@ -2855,3 +2856,8 @@ def monkey_patch_vllm_parallel_state(reverse: bool = False):
         setattr(vllm_parallel_state, "get_pp_group", get_pp_group)
         setattr(vllm_parallel_state, "get_tp_group", get_tp_group)
         setattr(vllm_parallel_state, "get_world_group", get_world_group)
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

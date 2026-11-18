@@ -95,7 +95,7 @@ _WARPS = _env_int("SGLANG_ACT_FLAT_WARPS", 4)
 _MAX_D = _env_int("SGLANG_ACT_FLAT_MAX_D", 256)   # 病理条件是 D/8 < 64 ⇒ D < 512
 _AUDIT = os.environ.get("SGLANG_ACT_FLAT_AUDIT", "1") != "0"
 
-# import 期断言：让非法旋钮在 sitecustomize 的「安装失败, 回退原实现」分支被接住并打出原因
+# import 期断言：非法旋钮由显式源码集成入口捕获，记录异常并保留原实现。
 assert _BLOCK >= 16 and (_BLOCK & (_BLOCK - 1)) == 0, f"BLOCK 必须是 2 的幂且 >=16, 实为 {_BLOCK}"
 assert _WARPS in (1, 2, 4, 8, 16), f"num_warps 必须属于 (1,2,4,8,16), 实为 {_WARPS}"
 
@@ -125,10 +125,7 @@ def _capturing():
 
 
 def install(module):
-    # 幂等守卫：标记必须打在**函数对象**上。
-    # 若打在模块上会有致命静默回退：sitecustomize 的 loader 在 install 前会先
-    # `self.real.exec_module(module)` 重跑模块体，把 module.silu_and_mul 重置成干净厂商函数，
-    # 而模块级标记仍为 True ⇒ 打印「已装过」却实际跑厂商核，性能掉回基线并被误判成「优化无效」。
+    # 幂等守卫标记在函数对象上，确保重复显式注册时不会套多层包装器。
     if getattr(module.silu_and_mul, "_act_flat", False):
         print(f"[act_flat] 已装过, 跳过二次安装 pid={os.getpid()}", flush=True)
         return

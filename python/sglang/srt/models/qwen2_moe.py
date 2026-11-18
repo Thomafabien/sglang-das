@@ -19,6 +19,7 @@
 """Inference-only Qwen2MoE model compatible with HuggingFace weights."""
 
 import logging
+import sys
 from contextlib import nullcontext
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
@@ -1204,3 +1205,8 @@ class Qwen2MoeForCausalLM(nn.Module):
 
 
 EntryClass = Qwen2MoeForCausalLM
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

@@ -9,7 +9,7 @@ GPU_DEVICES="${GPU_DEVICES:-4,5,6,7}"
 
 export HIP_VISIBLE_DEVICES="$GPU_DEVICES"
 export LD_LIBRARY_PATH="/opt/dtk/.hyhal/rocm_smi/lib:${LD_LIBRARY_PATH:-}"
-export PYTHONPATH="$REPO_ROOT/k100opt/patch:$REPO_ROOT/python"
+export PYTHONPATH="$REPO_ROOT/python${PYTHONPATH:+:$PYTHONPATH}"
 export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-2}"
 
 # Conv1D + GDN source integrations.
@@ -19,8 +19,8 @@ export SGLANG_CHUNK_H_CFG="${SGLANG_CHUNK_H_CFG:-1}"
 export SGLANG_GDN_NOZERO="${SGLANG_GDN_NOZERO:-1}"
 export SGLANG_GDN_CFG="${SGLANG_GDN_CFG:-1}"
 
-# MoE runtime integrations.  sitecustomize.py keeps them disabled unless these
-# switches are explicitly enabled.
+# MoE source integrations. Each switch is opt-in; setting it to 0 keeps the
+# original SGLang implementation active.
 export SGLANG_MOE_CONFIG_DIR="${SGLANG_MOE_CONFIG_DIR:-$REPO_ROOT/k100opt/config/moe_config}"
 export SGLANG_LIGHTOP_COMPAT="${SGLANG_LIGHTOP_COMPAT:-1}"
 export SGLANG_FAST_MOE_ALIGN="${SGLANG_FAST_MOE_ALIGN:-1}"

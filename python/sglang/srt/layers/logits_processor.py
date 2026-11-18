@@ -15,6 +15,7 @@
 
 import dataclasses
 import logging
+import sys
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -499,6 +500,7 @@ class LogitsProcessor(nn.Module):
             input_token_ids_logprobs_idx=logprobs_result.input_token_ids_logprobs_idx,
             mm_input_embeds=logits_metadata.mm_input_embeds,
         )
+
 
     def _get_pruned_states(
         self,
@@ -1168,3 +1170,8 @@ class LogitsProcessor(nn.Module):
             # They should be moved to GenerationBatchResult to keep this class clean.
             mm_input_embeds=logits_metadata.mm_input_embeds,
         )
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

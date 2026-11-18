@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
+
 from flash_attn import (
     flash_attn_varlen_func as flash_attn_varlen_func_interface,
     flash_attn_with_kvcache as flash_attn_with_kvcache_interface,
@@ -299,3 +301,8 @@ def vllm_flash_attn_varlen_func(
         k_descale=k_descale,
         v_descale=v_descale,
     )
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

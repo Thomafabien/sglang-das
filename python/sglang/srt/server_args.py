@@ -30,6 +30,7 @@ import math
 import os
 import random
 import socket
+import sys
 import tempfile
 import uuid
 from functools import cached_property
@@ -494,6 +495,8 @@ def _resolve_speculative_algorithm_alias(
                 "Detected Gemma4AssistantForCausalLM draft; "
                 f"promoting --speculative-algorithm {speculative_algorithm} to FROZEN_KV_MTP."
             )
+
+
             return "FROZEN_KV_MTP"
         return "EAGLE"
 
@@ -635,6 +638,8 @@ class ServerArgs:
                 '* "mindspore" will use the MindSpore model '
                 "implementation.\n"
             )
+
+
         ),
     ] = "auto"
     model_config_parser: A[
@@ -8094,6 +8099,8 @@ class PortArgs:
                 decoupled_spec_ipc_config=decoupled_spec_ipc_config,
                 instance_id=instance_id,
             )
+
+
         else:
             # DP attention. Use TCP + port to handle both single-node and multi-node.
             if server_args.nnodes == 1 and server_args.dist_init_addr is None:
@@ -8168,3 +8175,8 @@ class PortArgs:
                 ).to_tcp(),
                 instance_id=instance_id,
             )
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

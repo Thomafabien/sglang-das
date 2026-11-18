@@ -114,3 +114,8 @@ __all__ = [
     "global_config",
     "__version__",
 ]
+
+
+from sglang.srt.hcu_optim.integration import apply_fast_import as _apply_fast_import
+
+_apply_fast_import()

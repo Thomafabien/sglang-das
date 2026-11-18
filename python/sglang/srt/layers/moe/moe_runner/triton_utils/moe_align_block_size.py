@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Optional, Tuple
 
 import torch
@@ -291,3 +292,8 @@ def hcu_moe_align_block_size(
             expert_ids = expert_map[expert_ids]
 
     return sorted_ids, expert_ids, num_tokens_post_pad
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

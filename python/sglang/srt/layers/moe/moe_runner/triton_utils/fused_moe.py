@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import functools
+import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import torch
@@ -1615,3 +1616,8 @@ def fused_moe_fp8_w8a8(
         raise RuntimeError(
             "No MoE implementation available. Please set: export SGLANG_ROCM_USE_AITER_MOE=true and export SGLANG_USE_FP8_W8A8_MOE=0"
         )
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

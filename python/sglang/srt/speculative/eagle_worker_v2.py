@@ -14,6 +14,7 @@
 
 import contextlib
 import logging
+import sys
 import time
 from typing import List, Optional
 
@@ -1802,3 +1803,8 @@ class EAGLEWorkerV2(BaseSpecWorker):
             load_format=recv_req.load_format,
         )
         return success, message
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

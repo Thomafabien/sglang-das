@@ -1,0 +1,407 @@
+[
+ {
+  "excel_row": 4,
+  "inp": 1024,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 92.38,
+  "l20_tpot": 2.93
+ },
+ {
+  "excel_row": 5,
+  "inp": 1024,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 142.74,
+  "l20_tpot": 3.64
+ },
+ {
+  "excel_row": 6,
+  "inp": 1024,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 337.15,
+  "l20_tpot": 4.97
+ },
+ {
+  "excel_row": 7,
+  "inp": 1024,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 468.35,
+  "l20_tpot": 7.17
+ },
+ {
+  "excel_row": 8,
+  "inp": 1024,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 726.89,
+  "l20_tpot": 10.68
+ },
+ {
+  "excel_row": 9,
+  "inp": 2048,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 149.67,
+  "l20_tpot": 2.89
+ },
+ {
+  "excel_row": 10,
+  "inp": 2048,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 281.27,
+  "l20_tpot": 4.12
+ },
+ {
+  "excel_row": 11,
+  "inp": 2048,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 410.61,
+  "l20_tpot": 4.91
+ },
+ {
+  "excel_row": 12,
+  "inp": 2048,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 715.85,
+  "l20_tpot": 7.47
+ },
+ {
+  "excel_row": 13,
+  "inp": 2048,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 1198.08,
+  "l20_tpot": 11.18
+ },
+ {
+  "excel_row": 14,
+  "inp": 2048,
+  "out": 2048,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 146.32,
+  "l20_tpot": 2.88
+ },
+ {
+  "excel_row": 15,
+  "inp": 2048,
+  "out": 2048,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 217.65,
+  "l20_tpot": 3.86
+ },
+ {
+  "excel_row": 16,
+  "inp": 2048,
+  "out": 2048,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 403.58,
+  "l20_tpot": 4.69
+ },
+ {
+  "excel_row": 17,
+  "inp": 2048,
+  "out": 2048,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 682.64,
+  "l20_tpot": 7.01
+ },
+ {
+  "excel_row": 18,
+  "inp": 2048,
+  "out": 2048,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 1176.8,
+  "l20_tpot": 10.48
+ },
+ {
+  "excel_row": 19,
+  "inp": 4096,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 333.21,
+  "l20_tpot": 2.92
+ },
+ {
+  "excel_row": 20,
+  "inp": 4096,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 589.43,
+  "l20_tpot": 3.76
+ },
+ {
+  "excel_row": 21,
+  "inp": 4096,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 847.64,
+  "l20_tpot": 5.09
+ },
+ {
+  "excel_row": 22,
+  "inp": 4096,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 1317.53,
+  "l20_tpot": 7.75
+ },
+ {
+  "excel_row": 23,
+  "inp": 4096,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 2254.03,
+  "l20_tpot": 11.29
+ },
+ {
+  "excel_row": 24,
+  "inp": 7168,
+  "out": 2048,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 471.93,
+  "l20_tpot": 2.93
+ },
+ {
+  "excel_row": 25,
+  "inp": 7168,
+  "out": 2048,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 759.66,
+  "l20_tpot": 3.69
+ },
+ {
+  "excel_row": 26,
+  "inp": 7168,
+  "out": 2048,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 1220.68,
+  "l20_tpot": 4.74
+ },
+ {
+  "excel_row": 27,
+  "inp": 7168,
+  "out": 2048,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 2099.23,
+  "l20_tpot": 7.41
+ },
+ {
+  "excel_row": 28,
+  "inp": 7168,
+  "out": 2048,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 3944.27,
+  "l20_tpot": 11.16
+ },
+ {
+  "excel_row": 29,
+  "inp": 16384,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 1134.5,
+  "l20_tpot": 2.99
+ },
+ {
+  "excel_row": 30,
+  "inp": 16384,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 1772.95,
+  "l20_tpot": 4.19
+ },
+ {
+  "excel_row": 31,
+  "inp": 16384,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 2807.1,
+  "l20_tpot": 6.68
+ },
+ {
+  "excel_row": 32,
+  "inp": 16384,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 4818.77,
+  "l20_tpot": 10.66
+ },
+ {
+  "excel_row": 33,
+  "inp": 16384,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 9013.32,
+  "l20_tpot": 17.7
+ },
+ {
+  "excel_row": 34,
+  "inp": 32768,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 2310.68,
+  "l20_tpot": 3.41
+ },
+ {
+  "excel_row": 35,
+  "inp": 32768,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 3547.46,
+  "l20_tpot": 5.54
+ },
+ {
+  "excel_row": 36,
+  "inp": 32768,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 5738.36,
+  "l20_tpot": 8.97
+ },
+ {
+  "excel_row": 37,
+  "inp": 32768,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 10067.38,
+  "l20_tpot": 15.43
+ },
+ {
+  "excel_row": 38,
+  "inp": 32768,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 19295.69,
+  "l20_tpot": 28.09
+ },
+ {
+  "excel_row": 39,
+  "inp": 65536,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 5154.32,
+  "l20_tpot": 3.39
+ },
+ {
+  "excel_row": 40,
+  "inp": 65536,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 7705.89,
+  "l20_tpot": 6.62
+ },
+ {
+  "excel_row": 41,
+  "inp": 65536,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 12698.32,
+  "l20_tpot": 13.32
+ },
+ {
+  "excel_row": 42,
+  "inp": 65536,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 22513.22,
+  "l20_tpot": 25.44
+ },
+ {
+  "excel_row": 43,
+  "inp": 65536,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 45358.94,
+  "l20_tpot": 46.21
+ },
+ {
+  "excel_row": 44,
+  "inp": 131072,
+  "out": 1024,
+  "conc": 1,
+  "nprompts": 1,
+  "l20_ttft": 12728.31,
+  "l20_tpot": 5.66
+ },
+ {
+  "excel_row": 45,
+  "inp": 131072,
+  "out": 1024,
+  "conc": 2,
+  "nprompts": 2,
+  "l20_ttft": 19151.92,
+  "l20_tpot": 11.69
+ },
+ {
+  "excel_row": 46,
+  "inp": 131072,
+  "out": 1024,
+  "conc": 4,
+  "nprompts": 4,
+  "l20_ttft": 31223.39,
+  "l20_tpot": 25.11
+ },
+ {
+  "excel_row": 47,
+  "inp": 131072,
+  "out": 1024,
+  "conc": 8,
+  "nprompts": 8,
+  "l20_ttft": 56713.56,
+  "l20_tpot": 47.81
+ },
+ {
+  "excel_row": 48,
+  "inp": 131072,
+  "out": 1024,
+  "conc": 16,
+  "nprompts": 16,
+  "l20_ttft": 111500.7,
+  "l20_tpot": 63.95
+ }
+]

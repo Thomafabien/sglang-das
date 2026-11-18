@@ -29,6 +29,7 @@ import abc
 import dataclasses
 import logging
 import math
+import sys
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Union
@@ -4075,3 +4076,8 @@ class MiniMaxSparseKVPool(KVCache):
 
     def get_v_head_dim(self):
         return self.main_pool.get_value_buffer(0).shape[-1]
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

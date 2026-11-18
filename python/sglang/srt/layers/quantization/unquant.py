@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 
@@ -1108,3 +1109,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, MultiPlatformOp):
         return self.forward_cuda(*args, **kwargs)
 
     forward_native = forward_cpu
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

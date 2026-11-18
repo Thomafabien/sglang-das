@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from array import array
 
 from sglang.srt.environ import envs
@@ -1219,3 +1220,8 @@ class PrefillAdder:
         self.running_batch.filter_batch(keep_indices=keep_indices)
         self.preempt_list.extend(preemptible_reqs)
         return True
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

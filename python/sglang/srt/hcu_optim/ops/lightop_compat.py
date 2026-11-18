@@ -4,8 +4,7 @@ lightop >= 2608xx 把 `moe_align_block_size_out` 从 `lightop.op` 挪到了 `lig
 而海光 sglang 的 moe_align_block_size.py 仍按 `op.moe_align_block_size_out(...)` 调用
 → 运行时 AttributeError，MoE 直接跑不起来。
 
-原先是直接改海光源码解决的（11 行）。这里改成运行时绑定，
-保持「不改海光一个字」的性质：clone 本仓库即可，无需 patch vendor 树。
+该兼容逻辑现在作为 SGLang 源码内的显式可选扩展交付，无需外置 patch vendor 树。
 
 开关：SGLANG_LIGHTOP_COMPAT=0 可关闭（若将来上游自己修了）。
 """

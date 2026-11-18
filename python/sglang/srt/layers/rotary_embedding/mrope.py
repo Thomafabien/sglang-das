@@ -3,6 +3,7 @@ apply_interleaved_rope for multimodal RoPE."""
 
 from __future__ import annotations
 
+import sys
 from typing import List, Optional, Tuple
 
 import torch
@@ -608,3 +609,8 @@ class Ernie4_5_VLRotaryEmbedding(MRotaryEmbedding):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert positions.ndim == 1 or positions.ndim == 2
         return self.forward_cuda(positions, query, key)
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])

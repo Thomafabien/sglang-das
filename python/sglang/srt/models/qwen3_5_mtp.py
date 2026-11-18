@@ -16,6 +16,7 @@
 
 import copy
 import logging
+import sys
 from contextlib import ExitStack
 from typing import Iterable, Optional, Tuple
 
@@ -407,3 +408,8 @@ class Qwen3_5ForCausalLMMTP(nn.Module):
 
 
 EntryClass = [Qwen3_5ForCausalLMMTP]
+
+
+from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+
+_apply_hcu_optim(sys.modules[__name__])
