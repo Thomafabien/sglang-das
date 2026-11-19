@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -36,6 +37,7 @@ from sglang.srt.utils import (
     get_bool_env_var,
     is_cpu,
     is_cuda,
+    is_hcu,
     is_hip,
     is_musa,
     is_xpu,
@@ -57,9 +59,88 @@ _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
 _is_xpu = is_xpu()
 _use_sgl_xpu = use_intel_xpu_backend()
 _is_musa = is_musa()
+_is_hcu = is_hcu()
 _use_lightop = get_bool_env_var("SGLANG_USE_LIGHTOP")
 _use_aiter_moe = get_bool_env_var("SGLANG_ROCM_USE_AITER_MOE", default="true")
 _aiter_w4a16_moec_inplace_scale_keys: set[Any] = set()
+_enable_flat_hcu_silu_mul = get_bool_env_var("SGLANG_ACT_FLAT")
+_flat_hcu_silu_mul_min_m = int(os.environ.get("SGLANG_ACT_FLAT_MIN", "20000"))
+_flat_hcu_silu_mul_max_d = int(os.environ.get("SGLANG_ACT_FLAT_MAX_D", "256"))
+_flat_hcu_silu_mul_block = int(os.environ.get("SGLANG_ACT_FLAT_BLOCK", "1024"))
+_flat_hcu_silu_mul_warps = int(os.environ.get("SGLANG_ACT_FLAT_WARPS", "4"))
+
+
+def _should_use_flat_hcu_silu_mul(
+    m: int,
+    d: int,
+    *,
+    enabled: bool,
+    is_hcu_backend: bool,
+    tensors_compatible: bool,
+    min_m: int = 20000,
+    max_d: int = 256,
+) -> bool:
+    return (
+        enabled
+        and is_hcu_backend
+        and tensors_compatible
+        and m >= min_m
+        and 0 < d <= max_d
+        and d & (d - 1) == 0
+    )
+
+
+@triton.jit
+def _flat_hcu_silu_mul_kernel(
+    x_ptr,
+    out_ptr,
+    numel,
+    D: tl.constexpr,
+    BLOCK: tl.constexpr,
+):
+    offsets = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < numel
+    row = offsets // D
+    col = offsets % D
+    row_start = row * (2 * D)
+    gate = tl.load(x_ptr + row_start + col, mask=mask, other=0.0).to(tl.float32)
+    up = tl.load(x_ptr + row_start + D + col, mask=mask, other=0.0).to(
+        tl.float32
+    )
+    result = gate * tl.sigmoid(gate) * up
+    tl.store(out_ptr + offsets, result.to(out_ptr.dtype.element_ty), mask=mask)
+
+
+def _silu_and_mul_with_hcu_flat_path(x: torch.Tensor, out: torch.Tensor) -> None:
+    compatible = (
+        x.dim() == 2
+        and out.dim() == 2
+        and x.is_contiguous()
+        and out.is_contiguous()
+        and x.dtype == out.dtype
+        and x.shape[0] == out.shape[0]
+        and x.shape[1] == 2 * out.shape[1]
+    )
+    m, d = out.shape
+    if _should_use_flat_hcu_silu_mul(
+        m,
+        d,
+        enabled=_enable_flat_hcu_silu_mul,
+        is_hcu_backend=_is_hcu,
+        tensors_compatible=compatible,
+        min_m=_flat_hcu_silu_mul_min_m,
+        max_d=_flat_hcu_silu_mul_max_d,
+    ):
+        _flat_hcu_silu_mul_kernel[(triton.cdiv(m * d, _flat_hcu_silu_mul_block),)](
+            x,
+            out,
+            m * d,
+            D=d,
+            BLOCK=_flat_hcu_silu_mul_block,
+            num_warps=_flat_hcu_silu_mul_warps,
+        )
+        return
+    silu_and_mul(x, out)
 
 
 if _is_cuda:
@@ -957,7 +1038,9 @@ def _fused_moe_kernel_sequence(
                     expert_step=(config["BLOCK_SIZE_M"] if down_moe_use_tma else 1),
                 )
             else:
-                silu_and_mul(intermediate_cache1.view(-1, N), intermediate_cache2)
+                _silu_and_mul_with_hcu_flat_path(
+                    intermediate_cache1.view(-1, N), intermediate_cache2
+                )
         elif _is_musa:
             intermediate_cache2 = _silu_and_mul_musa(intermediate_cache1.view(-1, N))
         else:
