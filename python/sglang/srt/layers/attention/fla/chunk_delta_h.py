@@ -34,18 +34,35 @@ from sglang.srt.utils import get_bool_env_var, is_hcu
 _is_hcu = is_hcu()
 _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
 _enable_aiter_chunk_h_config = get_bool_env_var("SGLANG_CHUNK_H_CFG")
+_aiter_chunk_h_bv = int(os.getenv("SGLANG_CHUNK_H_BV", "16"))
+_aiter_chunk_h_num_warps = int(os.getenv("SGLANG_CHUNK_H_WARPS", "4"))
+_aiter_chunk_h_num_stages = int(os.getenv("SGLANG_CHUNK_H_STAGES", "2"))
+
+_AITER_CHUNK_H_VALIDATED_SHAPE = (128, 128, 64, 8)
 
 
 def _select_aiter_chunk_h_config(
-    K: int, V: int, BT: int, H: int, enabled: bool
+    K: int,
+    V: int,
+    BT: int,
+    H: int,
+    enabled: bool,
+    bv: int = 16,
+    num_warps: int = 4,
+    num_stages: int = 2,
 ):
-    """Select the validated gfx928 config for the production Qwen3.6 shape."""
-    if not enabled or (K, V, BT, H) != (128, 128, 64, 8):
+    """Select the validated gfx928 AITER config for the Qwen3.6 chunk-H shape.
+
+    Returning ``None`` preserves AITER's original configuration lookup. This is
+    intentional for the disabled path and for every shape that has not been
+    validated on gfx928.
+    """
+    if not enabled or (K, V, BT, H) != _AITER_CHUNK_H_VALIDATED_SHAPE:
         return None
     return {
-        "BV": int(os.getenv("SGLANG_CHUNK_H_BV", "16")),
-        "num_warps": int(os.getenv("SGLANG_CHUNK_H_WARPS", "4")),
-        "num_stages": int(os.getenv("SGLANG_CHUNK_H_STAGES", "2")),
+        "BV": bv,
+        "num_warps": num_warps,
+        "num_stages": num_stages,
     }
 
 
@@ -380,7 +397,14 @@ def chunk_gated_delta_rule_fwd_h(
         )
     else:
         kernel_cfg = _select_aiter_chunk_h_config(
-            K, V, BT, H, enabled=_enable_aiter_chunk_h_config
+            K,
+            V,
+            BT,
+            H,
+            enabled=_enable_aiter_chunk_h_config,
+            bv=_aiter_chunk_h_bv,
+            num_warps=_aiter_chunk_h_num_warps,
+            num_stages=_aiter_chunk_h_num_stages,
         )
         from aiter.ops.triton.fla.sglang.chunk_delta_h import (
             launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64,
