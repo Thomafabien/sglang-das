@@ -21,11 +21,18 @@ _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN"
 _enable_gdn_nozero = get_bool_env_var("SGLANG_GDN_NOZERO")
 
 
+def _should_skip_chunk_o_zero(
+    *, enabled: bool, use_aiter: bool, is_varlen: bool
+) -> bool:
+    """Return whether the validated AITER varlen path overwrites all output."""
+    return enabled and use_aiter and is_varlen
+
+
 def _allocate_chunk_o_output(v: torch.Tensor, cu_seqlens) -> torch.Tensor:
-    if (
-        _enable_gdn_nozero
-        and _use_prefill_aiter_linear_attn
-        and cu_seqlens is not None
+    if _should_skip_chunk_o_zero(
+        enabled=_enable_gdn_nozero,
+        use_aiter=_use_prefill_aiter_linear_attn,
+        is_varlen=cu_seqlens is not None,
     ):
         return torch.empty_like(v)
     return torch.zeros_like(v)
