@@ -54,18 +54,24 @@ elif is_xpu():
 from sglang.srt.utils import get_bool_env_var
 _use_decode_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
 _enable_aiter_gdn_config = get_bool_env_var("SGLANG_GDN_CFG")
+_AITER_GDN_VALIDATED_SHAPE = (4, 8)
 
 
 def _select_aiter_gdn_recurrent_config(
-    k, v, intermediate_states_buffer, enabled: bool
+    num_k_heads: int,
+    num_v_heads: int,
+    *,
+    is_target_verify: bool,
+    enabled: bool,
+    bv: int = 8,
+    num_warps: int = 4,
 ):
-    if not enabled or intermediate_states_buffer is None:
+    """Select the tuned gfx928 config only for its validated GDN shape."""
+    if not enabled or not is_target_verify:
         return None
-    if k is None or v is None or k.dim() != 4 or v.dim() != 4:
+    if (num_k_heads, num_v_heads) != _AITER_GDN_VALIDATED_SHAPE:
         return None
-    if (k.shape[2], v.shape[2]) != (4, 8):
-        return None
-    return {"BV": 8, "num_warps": 4}
+    return {"BV": bv, "num_warps": num_warps}
 
 class TritonGDNKernel(LinearAttnKernelBase):
     """Triton-based kernel for GDN (Gated Delta Network) linear attention."""
@@ -271,7 +277,10 @@ class TritonGDNKernel(LinearAttnKernelBase):
             )
         else:
             kernel_cfg = _select_aiter_gdn_recurrent_config(
-                k, v, intermediate_states_buffer, enabled=_enable_aiter_gdn_config
+                k.shape[2],
+                v.shape[2],
+                is_target_verify=intermediate_states_buffer is not None,
+                enabled=_enable_aiter_gdn_config,
             )
             from aiter.ops.triton.fla.fused_sigmoid_gating_recurrent import fused_sigmoid_gating_delta_rule_update as aiter_fused_sigmoid_gating_delta_rule_update
             return aiter_fused_sigmoid_gating_delta_rule_update(
