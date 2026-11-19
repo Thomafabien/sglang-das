@@ -68,6 +68,9 @@ _flat_hcu_silu_mul_min_m = int(os.environ.get("SGLANG_ACT_FLAT_MIN", "20000"))
 _flat_hcu_silu_mul_max_d = int(os.environ.get("SGLANG_ACT_FLAT_MAX_D", "256"))
 _flat_hcu_silu_mul_block = int(os.environ.get("SGLANG_ACT_FLAT_BLOCK", "1024"))
 _flat_hcu_silu_mul_warps = int(os.environ.get("SGLANG_ACT_FLAT_WARPS", "4"))
+_enable_m3_fused_sum_gate = get_bool_env_var("SGLANG_M3_FUSE")
+_m3_sum_gate_active = False
+_m3_pending_reduce = None
 
 
 def _should_use_flat_hcu_silu_mul(
@@ -141,6 +144,119 @@ def _silu_and_mul_with_hcu_flat_path(x: torch.Tensor, out: torch.Tensor) -> None
         )
         return
     silu_and_mul(x, out)
+
+
+def _can_fuse_m3_sum_gate(
+    *, enabled: bool, is_hcu_backend: bool, has_shared_gate: bool,
+    is_deepep: bool, num_tokens: int,
+) -> bool:
+    return (
+        enabled and is_hcu_backend and has_shared_gate
+        and not is_deepep and num_tokens > 0
+    )
+
+
+def begin_m3_fused_sum_gate(
+    *, has_shared_gate: bool, is_deepep: bool, num_tokens: int
+) -> bool:
+    global _m3_sum_gate_active, _m3_pending_reduce
+    if _m3_sum_gate_active or not _can_fuse_m3_sum_gate(
+        enabled=_enable_m3_fused_sum_gate,
+        is_hcu_backend=_is_hcu,
+        has_shared_gate=has_shared_gate,
+        is_deepep=is_deepep,
+        num_tokens=num_tokens,
+    ):
+        return False
+    _m3_pending_reduce = None
+    _m3_sum_gate_active = True
+    return True
+
+
+def cancel_m3_fused_sum_gate() -> None:
+    global _m3_sum_gate_active, _m3_pending_reduce
+    _m3_sum_gate_active = False
+    _m3_pending_reduce = None
+
+
+def _maybe_defer_m3_reduce(expert_output, output, scale, use_torch_compile) -> bool:
+    global _m3_pending_reduce
+    if not _m3_sum_gate_active:
+        return False
+    _m3_pending_reduce = (expert_output, output, scale, use_torch_compile)
+    return True
+
+
+def _complete_m3_pending_reduce(pending) -> None:
+    expert_output, output, scale, use_torch_compile = pending
+    if use_torch_compile:
+        moe_sum_reduce_torch_compile(expert_output, output, scale)
+    else:
+        moe_sum_reduce_triton(expert_output, output, scale)
+
+
+@triton.jit
+def _m3_fused_sum_gate_kernel(
+    expert_ptr, expert_stride_token, expert_stride_topk,
+    hidden_ptr, gate_weight_ptr, shared_ptr, output_ptr, output_stride_token,
+    hidden_dim: tl.constexpr, TOPK: tl.constexpr, BLOCK: tl.constexpr, scale,
+):
+    token = tl.program_id(0).to(tl.int64)
+    offsets = tl.arange(0, BLOCK)
+    mask = offsets < hidden_dim
+    expert_base = expert_ptr + token * expert_stride_token + offsets
+    routed = tl.zeros((BLOCK,), dtype=tl.float32)
+    for expert in tl.static_range(TOPK):
+        routed += tl.load(
+            expert_base + expert * expert_stride_topk, mask=mask, other=0.0
+        ).to(tl.float32)
+    routed *= scale
+    hidden = tl.load(
+        hidden_ptr + token * hidden_dim + offsets, mask=mask, other=0.0
+    ).to(tl.float32)
+    gate_weight = tl.load(gate_weight_ptr + offsets, mask=mask, other=0.0).to(
+        tl.float32
+    )
+    gate = tl.sigmoid(tl.sum(hidden * gate_weight, axis=0))
+    shared = tl.load(
+        shared_ptr + token * hidden_dim + offsets, mask=mask, other=0.0
+    ).to(tl.float32)
+    tl.store(
+        output_ptr + token * output_stride_token + offsets,
+        (routed + gate * shared).to(output_ptr.dtype.element_ty), mask=mask,
+    )
+
+
+def finish_m3_fused_sum_gate(
+    hidden_states, gate_weight, shared_output, final_hidden_states
+) -> bool:
+    global _m3_sum_gate_active, _m3_pending_reduce
+    pending = _m3_pending_reduce
+    _m3_sum_gate_active = False
+    _m3_pending_reduce = None
+    if pending is None:
+        return False
+    expert_output, output, scale, _ = pending
+    compatible = (
+        expert_output.dim() == 3
+        and output.data_ptr() == final_hidden_states.data_ptr()
+        and expert_output.shape[0] == final_hidden_states.shape[0]
+        and expert_output.shape[2] == final_hidden_states.shape[1]
+        and expert_output.is_contiguous() and hidden_states.is_contiguous()
+        and gate_weight.is_contiguous() and shared_output.is_contiguous()
+        and final_hidden_states.is_contiguous()
+    )
+    if not compatible:
+        _complete_m3_pending_reduce(pending)
+        return False
+    num_tokens, topk, hidden_dim = expert_output.shape
+    _m3_fused_sum_gate_kernel[(num_tokens,)](
+        expert_output, expert_output.stride(0), expert_output.stride(1),
+        hidden_states, gate_weight, shared_output, final_hidden_states,
+        final_hidden_states.stride(0), hidden_dim=hidden_dim, TOPK=topk,
+        BLOCK=triton.next_power_of_2(hidden_dim), scale=scale, num_warps=16,
+    )
+    return True
 
 
 if _is_cuda:
@@ -1188,7 +1304,15 @@ def _fused_moe_kernel_sequence(
             )
         else:
             # According to micro benchmark results, torch.compile can get better performance for small token.
-            if _use_moe_sum_reduce_torch_compile(num_tokens):
+            use_torch_compile = _use_moe_sum_reduce_torch_compile(num_tokens)
+            if _maybe_defer_m3_reduce(
+                intermediate_cache3.view(*intermediate_cache3.shape),
+                out_hidden_states,
+                routed_scaling_factor,
+                use_torch_compile,
+            ):
+                pass
+            elif use_torch_compile:
                 moe_sum_reduce_torch_compile(
                     intermediate_cache3.view(*intermediate_cache3.shape),
                     out_hidden_states,

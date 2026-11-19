@@ -45,9 +45,6 @@ TARGETS = {
     "sglang.srt.entrypoints.warmup": (
         ("sglang.srt.hcu_optim.infra.warm_batch", "SGLANG_WARM_BATCH"),
     ),
-    "sglang.srt.models.qwen2_moe": (
-        ("sglang.srt.hcu_optim.ops.m3_fuse", "SGLANG_M3_FUSE"),
-    ),
     "sglang.srt.managers.schedule_policy": (
         ("sglang.srt.hcu_optim.sched.adaptive_pmr", "SGLANG_ADAPTIVE_PMR"),
         ("sglang.srt.hcu_optim.sched.long_admit", "SGLANG_LONG_ADMIT"),

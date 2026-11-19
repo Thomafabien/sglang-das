@@ -554,6 +554,7 @@ class Qwen2MoeSparseMoeBlock(nn.Module):
             and not use_intel_amx_backend(self.shared_expert_gate)
             and not is_npu()
         )
+        use_m3_fused_sum_gate = False
 
         if hidden_states.shape[0] == 0:
             # M=0 guard for idle DP ranks: skip shared_experts and gate
@@ -570,16 +571,45 @@ class Qwen2MoeSparseMoeBlock(nn.Module):
             shared_output = self._forward_shared_experts(
                 hidden_states, apply_gate=not use_fused_gate
             )
-            final_hidden_states = self._forward_router_experts(hidden_states)
+            if use_fused_gate and shared_output is not None:
+                from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import (
+                    begin_m3_fused_sum_gate,
+                    cancel_m3_fused_sum_gate,
+                )
+
+                use_m3_fused_sum_gate = begin_m3_fused_sum_gate(
+                    has_shared_gate=True,
+                    is_deepep=False,
+                    num_tokens=hidden_states.shape[0],
+                )
+            try:
+                final_hidden_states = self._forward_router_experts(hidden_states)
+            except Exception:
+                if use_m3_fused_sum_gate:
+                    cancel_m3_fused_sum_gate()
+                raise
 
         if shared_output is not None:
             if use_fused_gate:
-                fused_gate_sigmoid_mul_add(
-                    hidden_states,
-                    self.shared_expert_gate.weight.squeeze(),
-                    shared_output,
-                    final_hidden_states,
-                )
+                fused_m3 = False
+                if use_m3_fused_sum_gate:
+                    from sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe import (
+                        finish_m3_fused_sum_gate,
+                    )
+
+                    fused_m3 = finish_m3_fused_sum_gate(
+                        hidden_states,
+                        self.shared_expert_gate.weight.squeeze(),
+                        shared_output,
+                        final_hidden_states,
+                    )
+                if not fused_m3:
+                    fused_gate_sigmoid_mul_add(
+                        hidden_states,
+                        self.shared_expert_gate.weight.squeeze(),
+                        shared_output,
+                        final_hidden_states,
+                    )
             else:
                 final_hidden_states += shared_output
         if (
