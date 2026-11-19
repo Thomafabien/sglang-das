@@ -8,7 +8,7 @@
 - 被测 tree：`43251a916928d02a07570d6c7236db2da0474556`
 - 模型：`/model/Qwen3.6-35B-A3B`
 - GPU：`4,5,6,7`，TP=4，端口 `30010`
-- 启动：`bash k100opt/start_all_optimizations.sh`
+- 启动配置由源码仓库外的独立部署脚本提供。
 
 本地与容器在启动前同时核对 commit 和 tree，两个值均一致。容器通过 `git pull --ff-only` 同步，没有覆盖本地修改。
 

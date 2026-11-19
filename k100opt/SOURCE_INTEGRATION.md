@@ -91,30 +91,16 @@
 - `SGLANG_WARM_BATCH_GROUPS`；
 - `SGLANG_CPU_GOVERNOR`、`SGLANG_GPU_PERFLEVEL`。
 
-## 4. 启动与 A/B
+## 4. 部署边界与 A/B 接口
 
-原始路径：新 shell 中不设置上述一级开关，只设置：
+源码仓库只定义一级开关、二级调优参数及其语义，不保存服务启动命令、节点路径、模型路径、GPU 编号或端口。部署脚本必须由使用方在源码仓库外独立维护。
 
-```bash
-export PYTHONPATH=/workspace/sglang-das-k100opt/python
-python3 -u -m sglang.launch_server ...
-```
+- clean 路径：部署环境不设置任何一级优化开关；
+- 单项 A/B：部署环境只设置一个目标一级开关；
+- 组合验证：由外部部署脚本显式组合一级开关；
+- FP8 KV、pair-prefill、量化通信和调度策略会改变运行条件，必须分别验证正确性后再纳入最终组合。
 
-单项测试只设置一个一级开关，例如：
-
-```bash
-SGLANG_ACT_FLAT=1 SGLANG_ACT_FLAT_MIN=20000 \
-  python3 -u -m sglang.launch_server ...
-```
-
-组合脚本：
-
-```bash
-bash k100opt/start_gdn_moe_server.sh       # 已验证的 Conv1D+GDN+MoE
-bash k100opt/start_all_optimizations.sh     # 全模块集成候选
-```
-
-全模块脚本用于集成验证，不应替代逐项 A/B。FP8 KV、pair-prefill、量化通信和调度策略会改变运行条件，必须分别验证正确性后再纳入最终性能配置。
+这样可以保证源码包可直接提交上游，不夹带客户节点、容器和模型的运行配置。
 
 ## 5. 验证顺序
 
