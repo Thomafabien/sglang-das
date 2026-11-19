@@ -21,7 +21,15 @@ import torch
 import triton
 
 from sglang.srt.environ import envs
-from sglang.srt.utils import is_cuda, is_hcu, is_hip, is_musa, is_xpu, round_up
+from sglang.srt.utils import (
+    get_bool_env_var,
+    is_cuda,
+    is_hcu,
+    is_hip,
+    is_musa,
+    is_xpu,
+    round_up,
+)
 
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 
@@ -30,12 +38,47 @@ _is_hip = is_hip()
 _is_hcu = is_hcu()
 _is_xpu = is_xpu()
 _is_musa = is_musa()
+_enable_fast_hcu_moe_align = get_bool_env_var("SGLANG_FAST_MOE_ALIGN")
 
 if _is_cuda or _is_hip or _is_xpu or _is_musa:
     from sglang.kernels.ops.moe import moe_align_block_size as sgl_moe_align_block_size
 
 if _is_hcu:
     from lightop import op
+
+
+def _can_use_fast_hcu_moe_align(
+    *,
+    enabled: bool,
+    ep_size: int,
+    enable_eplb: bool,
+    redundant_experts: int,
+    is_deepep: bool,
+) -> bool:
+    return (
+        enabled
+        and ep_size == 1
+        and not enable_eplb
+        and redundant_experts == 0
+        and not is_deepep
+    )
+
+
+def _fast_hcu_moe_align_enabled() -> bool:
+    try:
+        from sglang.srt.layers.moe.utils import get_moe_a2a_backend
+        from sglang.srt.server_args import get_global_server_args
+
+        server_args = get_global_server_args()
+        return _can_use_fast_hcu_moe_align(
+            enabled=_enable_fast_hcu_moe_align,
+            ep_size=server_args.ep_size,
+            enable_eplb=server_args.enable_eplb,
+            redundant_experts=server_args.ep_num_redundant_experts,
+            is_deepep=get_moe_a2a_backend().is_deepep(),
+        )
+    except (AttributeError, RuntimeError):
+        return False
 
 
 def moe_align_block_size(
@@ -115,15 +158,20 @@ def moe_align_block_size(
         # -1.  LightOp expects non-negative ids, so route them through one
         # extra sentinel expert and map the aligned sentinel blocks back to
         # -1 for the Triton MoE kernel's filter_expert path.
-        invalid_expert = num_experts
         # LightOp preserves the caller-provided padding value.  Triton masks a
         # row only when its sorted token id is >= topk_ids.numel(); leaving the
         # torch.empty buffer uninitialized can turn padding into real tokens.
         sorted_ids.fill_(topk_ids.numel())
-        hcu_topk_ids = torch.where(
-            topk_ids < 0,
-            torch.full_like(topk_ids, invalid_expert),
-            topk_ids,
+        fast_align = _fast_hcu_moe_align_enabled()
+        invalid_expert = num_experts
+        hcu_topk_ids = (
+            topk_ids
+            if fast_align
+            else torch.where(
+                topk_ids < 0,
+                torch.full_like(topk_ids, invalid_expert),
+                topk_ids,
+            )
         )
         op.moe_align_block_size(
             hcu_topk_ids,
@@ -138,7 +186,8 @@ def moe_align_block_size(
             False,
             True,
         )
-        expert_ids.masked_fill_(expert_ids == invalid_expert, -1)
+        if not fast_align:
+            expert_ids.masked_fill_(expert_ids == invalid_expert, -1)
     elif use_jit_align:
         from sglang.jit_kernel.moe_align import (
             moe_align_block_size as jit_moe_align_block_size,

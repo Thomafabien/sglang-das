@@ -54,7 +54,6 @@ TARGETS = {
     ),
     "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe": (
         ("sglang.srt.hcu_optim.ops.moe_pack_w13", "SGLANG_MOE_PACK_W13"),
-        ("sglang.srt.hcu_optim.ops.fast_moe_align", "SGLANG_FAST_MOE_ALIGN"),
         ("sglang.srt.hcu_optim.ops.act_flat", "SGLANG_ACT_FLAT"),
     ),
     "sglang.srt.server_args": (
