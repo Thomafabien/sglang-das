@@ -199,6 +199,35 @@ def _eligible(self, t):
             and t.shape[1] % _G == 0 and t.numel() >= _MIN_NUMEL)
 
 
+def dispatch_all_reduce(group, tensor, original):
+    """Select the quantized path while preserving the coordinator fallback."""
+    handoff = _PP is not None and _PP.ENABLED and _PP.in_handoff()
+    if handoff:
+        _PP.before_ar()
+    try:
+        _refresh_cfg()
+        if not _eligible(group, tensor) or os.path.exists(_OFF_FILE):
+            return original(group, tensor)
+        pc = getattr(group, "pynccl_comm", None)
+        if pc is not None and pc.disabled:
+            pc = None
+        capturing = torch.cuda.is_current_stream_capturing()
+        if (not _IN_GRAPH and (capturing or pc is not None)) or (
+            capturing and pc is None
+        ):
+            return original(group, tensor)
+        if pc is None and _st.get("dbg_left", 0) > 0:
+            _st["dbg_left"] -= 1
+            return _debug_compare(group, tensor, original)
+        _st["n_q"] += 1
+        return quant_all_reduce_(
+            tensor, group.device_group, group.rank_in_group, group.world_size, pc=pc
+        )
+    finally:
+        if handoff:
+            _PP.after_ar()
+
+
 def install(mod):
     GC = getattr(mod, "GroupCoordinator", None)
     if GC is None or getattr(GC, "_quant_ar_installed", False):

@@ -58,9 +58,6 @@ TARGETS = {
     "sglang.srt.managers.tokenizer_manager": (
         ("sglang.srt.hcu_optim.infra.tok_pool", "SGLANG_TOK_POOL"),
     ),
-    "sglang.srt.distributed.parallel_state": (
-        ("sglang.srt.hcu_optim.comm.quant_ar", "SGLANG_QUANT_AR"),
-    ),
 }
 
 

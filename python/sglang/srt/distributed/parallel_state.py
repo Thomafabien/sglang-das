@@ -669,6 +669,15 @@ class GroupCoordinator:
                 yield graph_capture_context
 
     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
+        from sglang.srt.hcu_optim.integration import is_enabled
+
+        if is_enabled("SGLANG_QUANT_AR"):
+            from sglang.srt.hcu_optim.comm.quant_ar import dispatch_all_reduce
+
+            return dispatch_all_reduce(self, input_, GroupCoordinator._all_reduce_default)
+        return self._all_reduce_default(input_)
+
+    def _all_reduce_default(self, input_: torch.Tensor) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
