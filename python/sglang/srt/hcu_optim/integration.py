@@ -31,7 +31,6 @@ TARGETS = {
         ("sglang.srt.hcu_optim.ops.lightop_compat", "SGLANG_LIGHTOP_COMPAT"),
     ),
     "sglang.srt.speculative.eagle_worker_v2": (
-        ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
         ("sglang.srt.hcu_optim.ops.vocab_par_verify", "SGLANG_VPA_VERIFY"),
     ),
     "sglang.srt.layers.logits_processor": (

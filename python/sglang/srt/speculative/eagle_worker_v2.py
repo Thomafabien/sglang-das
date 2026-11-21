@@ -129,11 +129,18 @@ from sglang.srt.utils.patch_torch import monkey_patch_torch_reductions
 
 _is_cpu = is_cpu()
 _enable_fused_draft_topk = get_bool_env_var("SGLANG_FUSED_DRAFT_TOPK")
+_enable_vocab_par_draft = get_bool_env_var("SGLANG_VPA_DRAFT")
 
 
 def _maybe_fused_draft_topk(logits, use_rejection_sampling, topk):
     if not _enable_fused_draft_topk:
         return None
+    if _enable_vocab_par_draft:
+        from sglang.srt.hcu_optim.ops.vocab_par_draft import try_vocab_parallel_top1
+
+        result = try_vocab_parallel_top1(logits, use_rejection_sampling, topk)
+        if result is not None:
+            return result
     from sglang.srt.hcu_optim.ops.fused_draft_topk import maybe_fused_draft_topk
 
     return maybe_fused_draft_topk(logits, use_rejection_sampling, topk)
