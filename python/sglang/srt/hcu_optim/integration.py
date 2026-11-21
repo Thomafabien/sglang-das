@@ -49,9 +49,6 @@ TARGETS = {
         ("sglang.srt.hcu_optim.sched.adaptive_pmr", "SGLANG_ADAPTIVE_PMR"),
         ("sglang.srt.hcu_optim.sched.long_admit", "SGLANG_LONG_ADMIT"),
     ),
-    "sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe": (
-        ("sglang.srt.hcu_optim.ops.moe_pack_w13", "SGLANG_MOE_PACK_W13"),
-    ),
     "sglang.srt.server_args": (
         ("sglang.srt.hcu_optim.infra.server_defaults", "SGLANG_SERVER_DEFAULTS"),
         ("sglang.srt.hcu_optim.kv.fp8_kv_hcu", "SGLANG_FP8_KV_HCU"),
@@ -65,7 +62,6 @@ TARGETS = {
     ),
     "sglang.srt.layers.quantization.unquant": (
         ("sglang.srt.hcu_optim.ops.dense_pack", "SGLANG_DENSE_PACK"),
-        ("sglang.srt.hcu_optim.ops.moe_pack_w13", "SGLANG_MOE_PACK_W13"),
     ),
     "sglang.srt.mem_cache.memory_pool": (
         ("sglang.srt.hcu_optim.ops.kv_write_fused", "SGLANG_KV_WRITE_FUSED"),

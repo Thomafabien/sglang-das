@@ -83,6 +83,7 @@ _is_hip = is_hip()
 _is_cpu = is_cpu()
 _is_npu = is_npu()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_enable_moe_pack_w13 = get_bool_env_var("SGLANG_MOE_PACK_W13")
 
 if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight
@@ -613,6 +614,13 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, MultiPlatformOp):
                     f"intermediate_size_per_partition={layer.intermediate_size_per_partition}; "
                     "using triton MoE runner."
                 )
+
+        if _enable_moe_pack_w13 and self.runner.runner_backend.is_triton():
+            from sglang.srt.hcu_optim.ops.moe_pack_w13 import (
+                pack_w13_if_supported,
+            )
+
+            pack_w13_if_supported(layer)
 
     @property
     def load_up_proj_weight_first(self) -> bool:

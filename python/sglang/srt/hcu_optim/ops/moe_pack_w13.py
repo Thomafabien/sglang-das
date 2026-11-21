@@ -87,6 +87,84 @@ def _pack(w):
     return w.view(E, N // BN, BN, K // BK, BK).permute(0, 1, 3, 2, 4).contiguous().view(E, N, K)
 
 
+def pack_w13_if_supported(layer) -> bool:
+    """Pack a validated unquantized w13 weight and register its data pointer."""
+    if not _enabled:
+        return False
+    w = getattr(layer, "w13_weight", None)
+    if (
+        w is None
+        or w.dim() != 3
+        or w.dtype != torch.bfloat16
+        or w.shape[1] % BN
+        or w.shape[2] % BK
+        or getattr(layer, "w13_weight_bias", None) is not None
+        or not w.is_contiguous()
+    ):
+        return False
+    packed = _pack(w.data)
+    w.data.copy_(packed)
+    _REG[w.data_ptr()] = (BN, BK)
+    _seen["pack"] += 1
+    return True
+
+
+def run_packed_w13_if_registered(
+    A, B, bias, C, A_scale, B_scale, B_zp, topk_weights, topk_ids,
+    sorted_token_ids, expert_ids, num_tokens_post_padded, mul_routed_weight,
+    top_k, config, compute_type=None, **kw,
+) -> bool:
+    """Run the packed kernel and return False when B uses the normal layout."""
+    if not _enabled or B.data_ptr() not in _REG:
+        return False
+    bad = [
+        key
+        for key in (
+            "use_fp8_w8a8", "use_int8_w8a8", "use_int8_w8a16",
+            "use_int4_w4a16", "per_channel_quant", "a_use_tma", "b_use_tma",
+            "c_sorted", "no_combine", "fuse_sum_all_reduce",
+            "fuse_add_to_output", "mask_output", "lora_preserve_base",
+        )
+        if kw.get(key)
+    ]
+    if bias is not None:
+        bad.append("bias")
+    if kw.get("block_shape") is not None:
+        bad.append("block_shape")
+    if kw.get("add_output_mask") is not None:
+        bad.append("add_output_mask")
+    if bad:
+        raise RuntimeError(
+            f"Packed w13 received unsupported options {bad}; the normal kernel "
+            "cannot read a packed weight."
+        )
+    pbn, pbk = _REG[B.data_ptr()]
+    N, K = B.shape[1], B.shape[2]
+    cfg = dict(config)
+    bn, bk = cfg["BLOCK_SIZE_N"], cfg["BLOCK_SIZE_K"]
+    if bn % pbn or N % bn:
+        bn = pbn
+    if bk % pbk or K % bk:
+        bk = pbk
+    grid = (
+        triton.cdiv(sorted_token_ids.shape[0], cfg["BLOCK_SIZE_M"])
+        * triton.cdiv(N, bn),
+    )
+    _w13_packed_kernel[grid](
+        A, B, C, topk_weights, sorted_token_ids, expert_ids,
+        num_tokens_post_padded, N, K, sorted_token_ids.shape[0],
+        topk_ids.numel(), A.stride(0), A.stride(1), B.stride(0),
+        C.stride(-2), C.stride(-1), BLOCK_SIZE_M=cfg["BLOCK_SIZE_M"],
+        BLOCK_SIZE_N=bn, BLOCK_SIZE_K=bk,
+        GROUP_SIZE_M=cfg.get("GROUP_SIZE_M", 1), top_k=top_k,
+        even_Ks=(K % bk == 0), PBN=pbn, PBK=pbk,
+        MUL_ROUTED_WEIGHT=bool(mul_routed_weight),
+        compute_type=compute_type if compute_type is not None else tl.bfloat16,
+        num_warps=cfg.get("num_warps", 4), num_stages=cfg.get("num_stages", 2),
+    )
+    return True
+
+
 def _install_pack(mod):
     cls = mod.UnquantizedFusedMoEMethod
     orig = cls.process_weights_after_loading

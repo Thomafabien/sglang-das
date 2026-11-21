@@ -22,7 +22,7 @@ from lightop.moe import get_moe_cuda_marlin_config, moe_gemm_marlin_w8a8_fp8
 
 from sglang.kernels.ops.moe.fused_moe_triton_kernels import (
     act_and_mul_triton,
-    invoke_fused_moe_kernel,
+    invoke_fused_moe_kernel as _invoke_fused_moe_kernel,
     moe_sum_reduce_triton,
     support_tensor_descriptor,
 )
@@ -71,6 +71,17 @@ _flat_hcu_silu_mul_warps = int(os.environ.get("SGLANG_ACT_FLAT_WARPS", "4"))
 _enable_m3_fused_sum_gate = get_bool_env_var("SGLANG_M3_FUSE")
 _m3_sum_gate_active = False
 _m3_pending_reduce = None
+
+
+def invoke_fused_moe_kernel(*args, **kwargs):
+    if get_bool_env_var("SGLANG_MOE_PACK_W13"):
+        from sglang.srt.hcu_optim.ops.moe_pack_w13 import (
+            run_packed_w13_if_registered,
+        )
+
+        if run_packed_w13_if_registered(*args, **kwargs):
+            return None
+    return _invoke_fused_moe_kernel(*args, **kwargs)
 
 
 def _should_use_flat_hcu_silu_mul(
