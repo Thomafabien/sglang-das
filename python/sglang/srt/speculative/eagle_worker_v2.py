@@ -130,6 +130,17 @@ from sglang.srt.utils.patch_torch import monkey_patch_torch_reductions
 _is_cpu = is_cpu()
 _enable_fused_draft_topk = get_bool_env_var("SGLANG_FUSED_DRAFT_TOPK")
 _enable_vocab_par_draft = get_bool_env_var("SGLANG_VPA_DRAFT")
+_enable_vocab_par_verify = get_bool_env_var("SGLANG_VPA_VERIFY")
+
+
+def _sample_verify(verify_input, batch, logits_output, vocab_mask):
+    if _enable_vocab_par_verify:
+        from sglang.srt.hcu_optim.ops.vocab_par_verify import sample_sharded_verify
+
+        return sample_sharded_verify(
+            eagle_sample, verify_input, batch, logits_output, vocab_mask
+        )
+    return eagle_sample(verify_input, batch, logits_output, vocab_mask)
 
 
 def _maybe_fused_draft_topk(logits, use_rejection_sampling, topk):
@@ -1704,7 +1715,7 @@ class EAGLEWorkerV2(BaseSpecWorker):
             predict,
             accept_lens,
             accept_index,
-        ) = eagle_sample(verify_input, batch, logits_output, vocab_mask)
+        ) = _sample_verify(verify_input, batch, logits_output, vocab_mask)
         new_seq_lens = batch.seq_lens + accept_lens
         clear_unaccepted_c128 = getattr(
             self.token_to_kv_pool_allocator.get_kvcache(),

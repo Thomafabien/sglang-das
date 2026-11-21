@@ -41,7 +41,9 @@ def _eligible(proc, lm_head):
         W, rank = get_tp_group().world_size, get_tp_group().rank_in_group
         width = si.num_elements_padded
         algo = str(sa.speculative_algorithm).upper().split(".")[-1]
-        if not _ST["eagle"]: why = "eagle_worker_v2 的 eagle_sample 钩子未安装"
+        from sglang.srt.utils import get_bool_env_var
+
+        if not get_bool_env_var("SGLANG_VPA_VERIFY"): why = "SGLANG_VPA_VERIFY is disabled"
         elif algo not in ("EAGLE", "NEXTN"): why = f"算法 {algo} 不在白名单（只接管 EAGLEWorkerV2.verify）"
         elif getattr(sa, "enable_multi_layer_eagle", False): why = "multi-layer EAGLE 走另一个 worker"
         elif W & (W - 1) != 0: why = f"TP={W} 不是 2 的幂（合并核 tl.arange 要求）"
@@ -112,64 +114,53 @@ def _need_full(batch, vocab_mask, eu):
     return None
 
 
-def _install_eagle(mod):
-    if getattr(mod, "_kp_vpv_installed", False):
-        return
+def sample_sharded_verify(orig, verify_input, batch, logits_output, vocab_mask=None):
     import sglang.srt.speculative.eagle_utils as eu
     from sglang.srt.distributed import tensor_model_parallel_all_gather
-    orig = mod.eagle_sample
 
-    def eagle_sample(verify_input, batch, logits_output, vocab_mask=None):
-        lg = logits_output.next_token_logits
-        w = _ST["w"]
-        if w is None or batch.forward_mode.is_idle() or not isinstance(lg, torch.Tensor) or lg.dim() != 2:
-            return orig(verify_input, batch, logits_output, vocab_mask)
-        if lg.shape[-1] != w + 1:
-            if lg.shape[-1] != _ST["full_w"]:
-                raise RuntimeError(f"[vocab_par_verify] 验证 logits 宽度 {lg.shape[-1]} 既非 {w + 1} 也非全词表 {_ST['full_w']}")
-            return orig(verify_input, batch, logits_output, vocab_mask)
-        why = _need_full(batch, vocab_mask, eu)
-        if why is None:
-            bs = len(batch.seq_lens); dtn = verify_input.draft_token_num
-            dev = lg.device
-            target_predict = lg[:, w].to(torch.int64).reshape(bs, dtn)
-            candidates = verify_input.draft_token.reshape(bs, dtn)
-            predict = torch.zeros(lg.shape[0], dtype=torch.int32, device=dev)
-            accept_index = torch.full((bs, verify_input.max_tree_depth), -1, dtype=torch.int32, device=dev)
-            num_correct = torch.empty((bs,), dtype=torch.int32, device=dev)
-            predict, accept_index, num_correct = eu.verify_tree_greedy_func(
-                predicts=predict, accept_index=accept_index, accept_token_num=num_correct,
-                candidates=candidates, retrieve_index=verify_input.retrieve_index,
-                retrieve_next_token=verify_input.retrieve_next_token,
-                retrieve_next_sibling=verify_input.retrieve_next_sibling,
-                target_predict=target_predict, topk=verify_input.tree_topk)
-            _ST["fast"] += 1
-            n = _ST["fast"]
-            if n in (100, 10000, 1000000) and os.environ.get("RANK", "0") in ("0", ""):
-                print(f"[vocab_par_verify] 累计: 快路 {n} 次, 回退 {_ST['fb']} pid={os.getpid()}", flush=True)
-            if not _ST["first_fast"]:
-                _ST["first_fast"] = True
-                print(f"[vocab_par_verify] 首次生效（快路）: bs={bs} rows={lg.shape[0]} pid={os.getpid()}", flush=True)
-            return predict, num_correct + 1, accept_index
-        # 回退：图外补一次全收集（本卡分片 bf16 精确，收集只是拷贝 ⇒ 与现状逐位相同）
-        full = tensor_model_parallel_all_gather(lg[:, :w].to(torch.bfloat16).contiguous(), dim=-1).float()
-        logits_output.next_token_logits = full
-        _ST["fb"][why] = _ST["fb"].get(why, 0) + 1
-        if _ST["fb"][why] == 1:                          # 每种原因首次出现都打印
-            print(f"[vocab_par_verify] 回退全收集: 原因={why}（该原因首次）pid={os.getpid()}", flush=True)
+    lg = logits_output.next_token_logits
+    w = _ST["w"]
+    if w is None or batch.forward_mode.is_idle() or not isinstance(lg, torch.Tensor) or lg.dim() != 2:
         return orig(verify_input, batch, logits_output, vocab_mask)
-
-    mod.eagle_sample = eagle_sample
-    mod._kp_vpv_installed = True
-    _ST["eagle"] = True
-    print(f"[vocab_par_verify] 已安装到 {mod.__name__} (pid={os.getpid()})", flush=True)
+    if lg.shape[-1] != w + 1:
+        if lg.shape[-1] != _ST["full_w"]:
+            raise RuntimeError(f"[vocab_par_verify] 验证 logits 宽度 {lg.shape[-1]} 既非 {w + 1} 也非全词表 {_ST['full_w']}")
+        return orig(verify_input, batch, logits_output, vocab_mask)
+    why = _need_full(batch, vocab_mask, eu)
+    if why is None:
+        bs = len(batch.seq_lens); dtn = verify_input.draft_token_num
+        dev = lg.device
+        target_predict = lg[:, w].to(torch.int64).reshape(bs, dtn)
+        candidates = verify_input.draft_token.reshape(bs, dtn)
+        predict = torch.zeros(lg.shape[0], dtype=torch.int32, device=dev)
+        accept_index = torch.full((bs, verify_input.max_tree_depth), -1, dtype=torch.int32, device=dev)
+        num_correct = torch.empty((bs,), dtype=torch.int32, device=dev)
+        predict, accept_index, num_correct = eu.verify_tree_greedy_func(
+            predicts=predict, accept_index=accept_index, accept_token_num=num_correct,
+            candidates=candidates, retrieve_index=verify_input.retrieve_index,
+            retrieve_next_token=verify_input.retrieve_next_token,
+            retrieve_next_sibling=verify_input.retrieve_next_sibling,
+            target_predict=target_predict, topk=verify_input.tree_topk)
+        _ST["fast"] += 1
+        n = _ST["fast"]
+        if n in (100, 10000, 1000000) and os.environ.get("RANK", "0") in ("0", ""):
+            print(f"[vocab_par_verify] 累计: 快路 {n} 次, 回退 {_ST['fb']} pid={os.getpid()}", flush=True)
+        if not _ST["first_fast"]:
+            _ST["first_fast"] = True
+            print(f"[vocab_par_verify] 首次生效（快路）: bs={bs} rows={lg.shape[0]} pid={os.getpid()}", flush=True)
+        return predict, num_correct + 1, accept_index
+    # 回退：图外补一次全收集（本卡分片 bf16 精确，收集只是拷贝 ⇒ 与现状逐位相同）
+    full = tensor_model_parallel_all_gather(lg[:, :w].to(torch.bfloat16).contiguous(), dim=-1).float()
+    logits_output.next_token_logits = full
+    _ST["fb"][why] = _ST["fb"].get(why, 0) + 1
+    if _ST["fb"][why] == 1:                          # 每种原因首次出现都打印
+        print(f"[vocab_par_verify] 回退全收集: 原因={why}（该原因首次）pid={os.getpid()}", flush=True)
+    return orig(verify_input, batch, logits_output, vocab_mask)
 
 
 def install(mod):
     n = mod.__name__
     if n.endswith("logits_processor"):
         _install_logits(mod)
-    elif n.endswith("eagle_worker_v2"):
-        _install_eagle(mod)
     else:
         raise RuntimeError(f"未知目标模块 {n}")
