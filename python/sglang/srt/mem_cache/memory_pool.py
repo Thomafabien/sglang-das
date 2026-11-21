@@ -93,6 +93,7 @@ if TYPE_CHECKING:
 from sglang.srt.utils import get_bool_env_var
 
 _kv_layout_hcu_fa = get_bool_env_var("SGLANG_KV_LAYOUT_HCU_FA", default="true")
+_enable_kv_write_fused = get_bool_env_var("SGLANG_KV_WRITE_FUSED")
 
 logger = logging.getLogger(__name__)
 
@@ -1828,6 +1829,24 @@ class MHATokenToKVPool(KVCache):
             layer_id = layer_id_override
         else:
             layer_id = layer.layer_id
+        if (
+            _enable_kv_write_fused
+            and _kv_layout_hcu_fa
+            and torch.version.hip is not None
+            and self.dtype == torch.float8_e4m3fn
+            and self.store_dtype == torch.uint8
+            and k_scale is None
+            and v_scale is None
+            and dcp_kv_mask is None
+        ):
+            from sglang.srt.hcu_optim.ops.kv_write_fused import try_fused_write
+
+            lid = layer_id - self.start_layer
+            if try_fused_write(
+                cache_k, cache_v, loc, self.k_buffer[lid], self.v_buffer[lid],
+                self.page_size,
+            ):
+                return
         if cache_k.dtype != self.dtype:
             if k_scale is not None:
                 cache_k.div_(k_scale)

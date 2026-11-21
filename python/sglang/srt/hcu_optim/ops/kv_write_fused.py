@@ -52,6 +52,30 @@ def _fused(k, v, loc, kbuf, vbuf):
                       kbuf.stride(0), kbuf.stride(1), vbuf.stride(0), vbuf.stride(1), D=D, PAGE=PAGE)
 
 
+def try_fused_write(k, v, loc, kb, vb, page_size):
+    if (
+        k.ndim != 3 or k.shape != v.shape
+        or k.dtype != torch.bfloat16 or v.dtype != k.dtype
+        or k.stride(-1) != 1 or v.stride(-1) != 1
+        or loc.ndim != 1 or loc.numel() != k.shape[0]
+        or not loc.is_contiguous() or loc.dtype not in (torch.int32, torch.int64)
+        or not k.is_cuda or any(t.device != k.device for t in (v, loc, kb, vb))
+    ):
+        return False
+    m, h, d = k.shape
+    if (
+        d <= 0 or d & (d - 1) or h <= 0
+        or kb.ndim != 4 or kb.shape[1:] != (h, page_size, d)
+        or vb.shape != (kb.shape[0], h, d, page_size)
+        or kb.dtype != torch.uint8 or vb.dtype != torch.uint8
+        or not kb.is_contiguous() or not vb.is_contiguous()
+    ):
+        return False
+    if m:
+        _fused(k, v, loc, kb, vb)
+    return True
+
+
 def install(mod):
     C = mod.MHATokenToKVPool
     if getattr(C, "_kp_kvw_installed", False):

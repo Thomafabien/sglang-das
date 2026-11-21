@@ -59,9 +59,6 @@ TARGETS = {
     "sglang.srt.managers.tokenizer_manager": (
         ("sglang.srt.hcu_optim.infra.tok_pool", "SGLANG_TOK_POOL"),
     ),
-    "sglang.srt.mem_cache.memory_pool": (
-        ("sglang.srt.hcu_optim.ops.kv_write_fused", "SGLANG_KV_WRITE_FUSED"),
-    ),
     "sglang.srt.distributed.parallel_state": (
         ("sglang.srt.hcu_optim.comm.quant_ar", "SGLANG_QUANT_AR"),
     ),
