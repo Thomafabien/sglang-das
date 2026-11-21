@@ -10,6 +10,24 @@ import torch, triton, triton.language as tl
 
 S_SPLIT = 32          # 每行切成多少块
 
+
+def can_use_fused_draft_topk(logits, use_rejection_sampling, topk):
+    return (
+        not use_rejection_sampling
+        and topk == 1
+        and logits is not None
+        and logits.dim() == 2
+        and logits.is_cuda
+        and logits.dtype == torch.float32
+        and logits.shape[0] > 0
+    )
+
+
+def maybe_fused_draft_topk(logits, use_rejection_sampling, topk):
+    if can_use_fused_draft_topk(logits, use_rejection_sampling, topk):
+        return fused_max_prob(logits)
+    return None
+
 @triton.jit
 def _stage1(l_ptr, pm, ps, pi, Vn, sl, S: tl.constexpr, BLK: tl.constexpr):
     r = tl.program_id(0); c = tl.program_id(1)

@@ -22,6 +22,7 @@ import torch
 
 from sglang.kernels.ops.speculative.eagle import fill_bonus_tokens_func
 from sglang.srt.environ import envs
+from sglang.srt.utils import get_bool_env_var
 from sglang.srt.hardware_backend.npu.graph_runner.eagle_draft_extend_npu_graph_runner import (
     EAGLEDraftExtendNpuGraphRunner,
 )
@@ -127,6 +128,15 @@ from sglang.srt.utils.common import (
 from sglang.srt.utils.patch_torch import monkey_patch_torch_reductions
 
 _is_cpu = is_cpu()
+_enable_fused_draft_topk = get_bool_env_var("SGLANG_FUSED_DRAFT_TOPK")
+
+
+def _maybe_fused_draft_topk(logits, use_rejection_sampling, topk):
+    if not _enable_fused_draft_topk:
+        return None
+    from sglang.srt.hcu_optim.ops.fused_draft_topk import maybe_fused_draft_topk
+
+    return maybe_fused_draft_topk(logits, use_rejection_sampling, topk)
 _is_npu = is_npu()
 _is_cuda = is_cuda()
 _is_musa = is_musa()
@@ -736,12 +746,23 @@ class EagleDraftWorker(EagleDraftWorkerBase):
                 )
                 topk_p = torch.ones_like(topk_index, dtype=torch.float32)
             else:
-                probs = renorm_draft_probs(
+                fused = _maybe_fused_draft_topk(
                     logits_output.next_token_logits,
-                    forward_batch.sampling_info,
                     self.server_args.speculative_use_rejection_sampling,
+                    self.topk,
                 )
-                topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+                probs = (
+                    None
+                    if fused is not None
+                    else renorm_draft_probs(
+                        logits_output.next_token_logits,
+                        forward_batch.sampling_info,
+                        self.server_args.speculative_use_rejection_sampling,
+                    )
+                )
+                topk_p, topk_index = (
+                    fused if fused is not None else fast_topk(probs, self.topk, dim=-1)
+                )
             maybe_detect_oob(
                 topk_index,
                 0,
@@ -882,15 +903,24 @@ class EagleDraftWorker(EagleDraftWorkerBase):
 
         # Assemble the next-iter draft spec_info from the extend output.
         use_rejection_sampling = self.server_args.speculative_use_rejection_sampling
-        probs = renorm_draft_probs(
-            logits_output.next_token_logits,
-            batch.sampling_info,
-            use_rejection_sampling,
+        fused = _maybe_fused_draft_topk(
+            logits_output.next_token_logits, use_rejection_sampling, self.topk
+        )
+        probs = (
+            None
+            if fused is not None
+            else renorm_draft_probs(
+                logits_output.next_token_logits,
+                batch.sampling_info,
+                use_rejection_sampling,
+            )
         )
         if use_rejection_sampling:
             topk_p, topk_index = fast_sample(probs, num_samples=1)
         else:
-            topk_p, topk_index = fast_topk(probs, self.topk, dim=-1)
+            topk_p, topk_index = (
+                fused if fused is not None else fast_topk(probs, self.topk, dim=-1)
+            )
         return EagleDraftInput(
             topk_p=topk_p,
             topk_index=topk_index,
@@ -1040,12 +1070,23 @@ class EagleDraftWorker(EagleDraftWorkerBase):
             ret_topk_p = torch.ones_like(ret_topk_index, dtype=torch.float32)
             ret_draft_probs = None
         else:
-            probs = renorm_draft_probs(
+            fused = _maybe_fused_draft_topk(
                 draft_logits_output.next_token_logits,
-                batch.sampling_info,
                 self.server_args.speculative_use_rejection_sampling,
+                self.topk,
             )
-            ret_topk_p, ret_topk_index = fast_topk(probs, self.topk, dim=-1)
+            probs = (
+                None
+                if fused is not None
+                else renorm_draft_probs(
+                    draft_logits_output.next_token_logits,
+                    batch.sampling_info,
+                    self.server_args.speculative_use_rejection_sampling,
+                )
+            )
+            ret_topk_p, ret_topk_index = (
+                fused if fused is not None else fast_topk(probs, self.topk, dim=-1)
+            )
             ret_draft_probs = None
         ret_hidden_states = draft_logits_output.hidden_states
 
