@@ -84,6 +84,7 @@ _is_cpu = is_cpu()
 _is_npu = is_npu()
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
 _enable_moe_pack_w13 = get_bool_env_var("SGLANG_MOE_PACK_W13")
+_enable_dense_pack = get_bool_env_var("SGLANG_DENSE_PACK")
 
 if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight
@@ -206,6 +207,12 @@ class UnquantizedLinearMethod(LinearMethodBase):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         if _is_cpu and _is_cpu_amx_available:
             _amx_process_weight_after_loading(layer, ["weight"])
+        if _enable_dense_pack and _is_hcu:
+            from sglang.srt.hcu_optim.ops.dense_pack import (
+                pack_dense_weight_if_supported,
+            )
+
+            pack_dense_weight_if_supported(layer)
 
     def apply(
         self,
@@ -213,6 +220,14 @@ class UnquantizedLinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if _enable_dense_pack and _is_hcu:
+            from sglang.srt.hcu_optim.ops.dense_pack import (
+                apply_packed_dense_if_supported,
+            )
+
+            packed_output = apply_packed_dense_if_supported(layer, x, bias)
+            if packed_output is not None:
+                return packed_output
         if use_intel_amx_backend(layer):
             x_shapes = x.shape
             if len(x_shapes) == 3:

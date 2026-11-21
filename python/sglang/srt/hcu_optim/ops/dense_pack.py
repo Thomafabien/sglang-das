@@ -40,6 +40,46 @@ def _pack(w):
     return w.view(N // PBN, PBN, K // PBK, PBK).permute(0, 2, 1, 3).contiguous().view(N, K)
 
 
+def select_dense_pack_range(shape, m):
+    limits = _WHITE.get(tuple(shape))
+    return limits if limits is not None and limits[0] <= m <= limits[1] else None
+
+
+def pack_dense_weight_if_supported(layer) -> bool:
+    if not _enabled:
+        return False
+    weight = getattr(layer, "weight", None)
+    if (
+        weight is None
+        or weight.dim() != 2
+        or weight.dtype != torch.bfloat16
+        or tuple(weight.shape) not in _WHITE
+        or not weight.is_contiguous()
+    ):
+        return False
+    layer._hcu_dense_packed_weight = _pack(weight.data)
+    layer._hcu_dense_pack_range = _WHITE[tuple(weight.shape)]
+    return True
+
+
+def apply_packed_dense_if_supported(layer, x, bias=None):
+    if not _enabled or bias is not None or x.dtype != torch.bfloat16:
+        return None
+    packed = getattr(layer, "_hcu_dense_packed_weight", None)
+    limits = getattr(layer, "_hcu_dense_pack_range", None)
+    if packed is None or limits is None:
+        return None
+    k = x.shape[-1]
+    m = x.numel() // k
+    if not limits[0] <= m <= limits[1]:
+        return None
+    x2 = x.reshape(m, k)
+    if x2.stride(-1) != 1:
+        return None
+    output = _run(x2, packed, packed.shape[0], k)
+    return output.view(*x.shape[:-1], packed.shape[0])
+
+
 def _run(x2, wp, N, K):
     M = x2.shape[0]
     if M <= 16: BN, BK, nw = 32, 256, 2

@@ -60,9 +60,6 @@ TARGETS = {
     "sglang.srt.managers.tokenizer_manager": (
         ("sglang.srt.hcu_optim.infra.tok_pool", "SGLANG_TOK_POOL"),
     ),
-    "sglang.srt.layers.quantization.unquant": (
-        ("sglang.srt.hcu_optim.ops.dense_pack", "SGLANG_DENSE_PACK"),
-    ),
     "sglang.srt.mem_cache.memory_pool": (
         ("sglang.srt.hcu_optim.ops.kv_write_fused", "SGLANG_KV_WRITE_FUSED"),
     ),
