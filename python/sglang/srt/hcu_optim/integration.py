@@ -62,9 +62,6 @@ TARGETS = {
     "sglang.srt.mem_cache.memory_pool": (
         ("sglang.srt.hcu_optim.ops.kv_write_fused", "SGLANG_KV_WRITE_FUSED"),
     ),
-    "sglang.srt.layers.rotary_embedding.mrope": (
-        ("sglang.srt.hcu_optim.ops.mtp_rope_triton", "SGLANG_MTP_ROPE_TRITON"),
-    ),
     "sglang.srt.distributed.parallel_state": (
         ("sglang.srt.hcu_optim.comm.quant_ar", "SGLANG_QUANT_AR"),
     ),

@@ -245,6 +245,15 @@ class MRotaryEmbedding(RotaryEmbedding):
         assert positions.ndim == 1 or positions.ndim == 2
         if positions.ndim == 2 and self.mrope_section:
             return self.forward_triton(positions, query, key)
+        if (
+            get_bool_env_var("SGLANG_MTP_ROPE_TRITON")
+            and positions.ndim == 1
+            and self.mrope_section
+            and fused_set_kv_buffer_arg is None
+            and query.dim() == 2
+            and key.dim() == 2
+        ):
+            return self.forward_triton(positions.unsqueeze(0).expand(3, -1), query, key)
         return self.forward_native(positions, query, key, fused_set_kv_buffer_arg)
 
     def forward_triton(
