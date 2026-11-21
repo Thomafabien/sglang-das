@@ -532,6 +532,21 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, MultiPlatformOp):
                 weight = getattr(layer, weight_name)
                 weight.data = npu_format_cast(weight)
 
+        # The checkpoint loader writes row-major data into this storage.
+        # Publish the packed layout only after loading and backend transforms.
+        if (
+            _enable_moe_pack_w13
+            and _is_hcu
+            and not _should_use_aiter_moe
+            and not _use_aiter_w16a16_moe
+            and self.runner.runner_backend.is_triton()
+        ):
+            from sglang.srt.hcu_optim.ops.moe_pack_w13 import (
+                pack_w13_if_supported,
+            )
+
+            pack_w13_if_supported(layer)
+
         return
 
     def maybe_restore_flashinfer_trtllm_bf16_weight_shape_for_load(
@@ -629,13 +644,6 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, MultiPlatformOp):
                     f"intermediate_size_per_partition={layer.intermediate_size_per_partition}; "
                     "using triton MoE runner."
                 )
-
-        if _enable_moe_pack_w13 and self.runner.runner_backend.is_triton():
-            from sglang.srt.hcu_optim.ops.moe_pack_w13 import (
-                pack_w13_if_supported,
-            )
-
-            pack_w13_if_supported(layer)
 
     @property
     def load_up_proj_weight_first(self) -> bool:
