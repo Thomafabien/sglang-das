@@ -22,6 +22,7 @@ from sglang.srt.layers.rotary_embedding.yarn import (
 from sglang.srt.runtime_context import get_server_args
 from sglang.srt.utils import (
     cpu_has_amx_support,
+    get_bool_env_var,
     is_cuda,
     is_npu,
     is_xpu,
