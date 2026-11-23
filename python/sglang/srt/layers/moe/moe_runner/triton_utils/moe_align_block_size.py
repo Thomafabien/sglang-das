@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-import sys
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import torch
@@ -45,6 +45,22 @@ if _is_cuda or _is_hip or _is_xpu or _is_musa:
 
 if _is_hcu:
     from lightop import op
+
+
+@lru_cache(maxsize=1)
+def _get_lightop_moe_align_out():
+    align_out = getattr(op, "moe_align_block_size_out", None)
+    if align_out is not None:
+        return align_out
+
+    try:
+        from lightop.moe import moe_align_block_size_out
+    except ImportError as exc:
+        raise ImportError(
+            "HCU MoE alignment requires moe_align_block_size_out "
+            "in lightop.op or lightop.moe"
+        ) from exc
+    return moe_align_block_size_out
 
 
 def _can_use_fast_hcu_moe_align(
@@ -310,7 +326,7 @@ def hcu_moe_align_block_size(
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
 
     if expert_mask is not None:
-        op.moe_align_block_size_out(
+        _get_lightop_moe_align_out()(
             topk_ids,
             num_experts,
             block_size,
@@ -324,7 +340,7 @@ def hcu_moe_align_block_size(
             is_fuse_fill=True,
         )
     else:
-        op.moe_align_block_size_out(
+        _get_lightop_moe_align_out()(
             topk_ids,
             num_experts,
             block_size,
@@ -341,8 +357,3 @@ def hcu_moe_align_block_size(
             expert_ids = expert_map[expert_ids]
 
     return sorted_ids, expert_ids, num_tokens_post_pad
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])

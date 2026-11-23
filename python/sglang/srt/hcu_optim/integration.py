@@ -21,9 +21,6 @@ logger = logging.getLogger(__name__)
 # Every switch is opt-in.  Secondary tuning variables are documented in the
 # implementation module and in k100opt/SOURCE_INTEGRATION.md.
 TARGETS = {
-    "sglang.srt.layers.moe.moe_runner.triton_utils.moe_align_block_size": (
-        ("sglang.srt.hcu_optim.ops.lightop_compat", "SGLANG_LIGHTOP_COMPAT"),
-    ),
     "sglang.srt.layers.logits_processor": (
         ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
         ("sglang.srt.hcu_optim.ops.vocab_par_verify", "SGLANG_VPA_VERIFY"),
