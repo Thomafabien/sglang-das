@@ -29,11 +29,12 @@ GDN_CHUNK_H_BV = int(os.getenv("SGLANG_GDN_CHUNK_H_BV", "32"))
 GDN_CHUNK_H_NUM_WARPS = int(os.getenv("SGLANG_GDN_CHUNK_H_NUM_WARPS", "4"))
 GDN_CHUNK_H_NUM_STAGES = int(os.getenv("SGLANG_GDN_CHUNK_H_NUM_STAGES", "2"))
 
+from sglang.srt.environ import envs
 from sglang.srt.utils import get_bool_env_var, is_hcu
 
 _is_hcu = is_hcu()
 _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
-_enable_aiter_chunk_h_config = get_bool_env_var("SGLANG_CHUNK_H_CFG")
+_enable_aiter_chunk_h_config = envs.SGLANG_CHUNK_H_CFG.get()
 _aiter_chunk_h_bv = int(os.getenv("SGLANG_CHUNK_H_BV", "16"))
 _aiter_chunk_h_num_warps = int(os.getenv("SGLANG_CHUNK_H_WARPS", "4"))
 _aiter_chunk_h_num_stages = int(os.getenv("SGLANG_CHUNK_H_STAGES", "2"))

@@ -14,6 +14,7 @@
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.layers.attention.linear.kernels.kernel_backend import (
     LinearAttnKernelBase,
 )
@@ -53,7 +54,7 @@ elif is_xpu():
 
 from sglang.srt.utils import get_bool_env_var
 _use_decode_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
-_enable_aiter_gdn_config = get_bool_env_var("SGLANG_GDN_CFG")
+_enable_aiter_gdn_config = envs.SGLANG_GDN_CFG.get()
 _AITER_GDN_VALIDATED_SHAPE = (4, 8)
 
 

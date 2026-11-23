@@ -600,6 +600,10 @@ class Envs:
     SGLANG_USE_FUSED_TOPK_SOFTMAX = EnvBool(False)
     SGLANG_USE_FUSED_RESHAPE_TO_FLOAT = EnvBool(False)
     SGLANG_USE_AITER_LINEAR_ATTN = EnvBool(False)
+    SGLANG_CONV1D_CFG = EnvBool(False)
+    SGLANG_CHUNK_H_CFG = EnvBool(False)
+    SGLANG_GDN_CFG = EnvBool(False)
+    SGLANG_GDN_NOZERO = EnvBool(False)
 
     # MTHREADS & MUSA
     SGLANG_MUSA_FA3_FORCE_UPDATE_METADATA = EnvBool(False)

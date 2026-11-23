@@ -15,10 +15,11 @@ import triton.language as tl
 from sglang.srt.layers.attention.fla.index import prepare_chunk_indices
 from sglang.srt.layers.attention.fla.op import exp, safe_exp
 from sglang.srt.layers.attention.fla.utils import check_shared_mem, is_nvidia_hopper
+from sglang.srt.environ import envs
 from sglang.srt.utils import get_bool_env_var
 
 _use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
-_enable_gdn_nozero = get_bool_env_var("SGLANG_GDN_NOZERO")
+_enable_gdn_nozero = envs.SGLANG_GDN_NOZERO.get()
 
 
 def _should_skip_chunk_o_zero(

@@ -11,13 +11,11 @@ import triton
 import triton.language as tl
 
 from sglang.jit_kernel.utils import is_arch_support_pdl
-from sglang.srt.utils import get_bool_env_var
+from sglang.srt.environ import envs
 
 PAD_SLOT_ID = -1
 
-_ENABLE_CAUSAL_CONV1D_LONG_PREFILL_CONFIG = get_bool_env_var(
-    "SGLANG_CONV1D_CFG"
-)
+_ENABLE_CAUSAL_CONV1D_LONG_PREFILL_CONFIG = envs.SGLANG_CONV1D_CFG.get()
 _CAUSAL_CONV1D_FWD_DEFAULT_CONFIG = (8, 256, 4)
 _CAUSAL_CONV1D_FWD_LONG_PREFILL_CONFIGS = (
     # (minimum total tokens, BLOCK_M, BLOCK_N, num_warps)
