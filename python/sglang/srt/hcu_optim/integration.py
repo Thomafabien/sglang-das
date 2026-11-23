@@ -28,15 +28,9 @@ TARGETS = {
     "sglang.srt.models.qwen3_5_mtp": (
         ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
     ),
-    "sglang.srt.entrypoints.warmup": (
-        ("sglang.srt.hcu_optim.infra.warm_batch", "SGLANG_WARM_BATCH"),
-    ),
     "sglang.srt.managers.schedule_policy": (
         ("sglang.srt.hcu_optim.sched.adaptive_pmr", "SGLANG_ADAPTIVE_PMR"),
         ("sglang.srt.hcu_optim.sched.long_admit", "SGLANG_LONG_ADMIT"),
-    ),
-    "sglang.srt.server_args": (
-        ("sglang.srt.hcu_optim.infra.server_defaults", "SGLANG_SERVER_DEFAULTS"),
     ),
     "sglang.srt.managers.scheduler": (
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),

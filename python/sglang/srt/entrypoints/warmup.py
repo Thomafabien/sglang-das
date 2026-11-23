@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import sys
+import asyncio
 from typing import TYPE_CHECKING, List
 
 import numpy as np
@@ -162,6 +162,34 @@ async def prefill_shapes(disaggregation_mode: str, tokenizer_manager: TokenizerM
         await tokenizer_manager.generate_request(generate_req_input, None).__anext__()
 
 
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
+    from sglang.srt.environ import envs
 
-_apply_hcu_optim(sys.modules[__name__])
+    if envs.SGLANG_WARM_BATCH.get():
+        await _warm_prefill_batches(
+            disaggregation_mode, tokenizer_manager, envs.SGLANG_WARM_BATCH_GROUPS.get()
+        )
+
+
+async def _warm_prefill_batches(disaggregation_mode, tokenizer_manager, groups):
+    async def warm_one(size):
+        request = GenerateReqInput(
+            input_ids=np.random.randint(2**16, size=[size]).tolist(),
+            sampling_params={
+                "max_new_tokens": 16,
+                "temperature": 0.0,
+                "ignore_eos": True,
+            },
+        )
+        if disaggregation_mode != "null":
+            request.bootstrap_room = 0
+            request.bootstrap_host = FAKE_BOOTSTRAP_HOST
+        async for _ in tokenizer_manager.generate_request(request, None):
+            pass
+
+    try:
+        for group in groups.split(","):
+            count, size = map(int, group.split("x"))
+            await asyncio.gather(*(warm_one(size) for _ in range(count)))
+        print(f"[warm_batch] Extra prefill warmups complete: {groups}", flush=True)
+    except Exception as exc:
+        print(f"[warm_batch] Extra prefill warmups failed: {exc!r}", flush=True)

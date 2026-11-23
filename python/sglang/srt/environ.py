@@ -612,6 +612,12 @@ class Envs:
     SGLANG_USE_FUSED_TOPK_SOFTMAX = EnvBool(False)
     SGLANG_USE_FUSED_RESHAPE_TO_FLOAT = EnvBool(False)
     SGLANG_USE_AITER_LINEAR_ATTN = EnvBool(False)
+    SGLANG_SERVER_DEFAULTS = EnvBool(False)
+    SGLANG_WARM_BATCH = EnvBool(False)
+    SGLANG_WARM_BATCH_GROUPS = EnvStr(
+        "1x2501,1x3071,1x4287,1x6143,1x8191,1x12287,1x16383,"
+        "1x24575,1x32767,16x2111,4x4159"
+    )
     SGLANG_CONV1D_CFG = EnvBool(False)
     SGLANG_CHUNK_H_CFG = EnvBool(False)
     SGLANG_GDN_CFG = EnvBool(False)

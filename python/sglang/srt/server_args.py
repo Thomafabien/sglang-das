@@ -30,7 +30,6 @@ import math
 import os
 import random
 import socket
-import sys
 import tempfile
 import uuid
 from functools import cached_property
@@ -7995,6 +7994,10 @@ def prepare_server_args(argv: List[str]) -> ServerArgs:
     Returns:
         The server arguments.
     """
+    if envs.SGLANG_SERVER_DEFAULTS.get():
+        from sglang.srt.arg_groups.hcu_server_defaults import apply_server_defaults
+
+        argv = apply_server_defaults(argv)
     parser = argparse.ArgumentParser(prog="sglang serve")
     ServerArgs.add_cli_args(parser)
 
@@ -8184,8 +8187,3 @@ class PortArgs:
                 ).to_tcp(),
                 instance_id=instance_id,
             )
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])

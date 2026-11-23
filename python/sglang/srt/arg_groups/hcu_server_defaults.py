@@ -105,53 +105,44 @@ def _gpu_perflevel():
               f"请在主机上执行：hy-smi --setperflevel {want}", flush=True)
 
 
-def install(mod):
-    if getattr(mod, "_server_defaults_installed", False) or not hasattr(mod, "prepare_server_args"):
-        return
-    orig = mod.prepare_server_args
+def apply_server_defaults(argv):
+    argv = list(argv); added = []
+    has = lambda *ks: any(k in argv or any(a.startswith(k + "=") for a in argv) for k in ks)
 
-    def prepare_server_args(argv):
-        argv = list(argv); added = []
-        has = lambda *ks: any(k in argv or any(a.startswith(k + "=") for a in argv) for k in ks)
-
-        def add(*items):
-            argv.extend(items); added.append(" ".join(items))
-        if not has("--page-size"):
-            add("--page-size", "64")
-        if not has("--disable-custom-all-reduce", "--custom-all-reduce-backend"):
-            add("--disable-custom-all-reduce")
-        if not has("--warmups"):
-            add("--warmups", "prefill_shapes")
-        if not has("--prefill-max-requests"):
-            add("--prefill-max-requests", "2")
-        if not has("--max-prefill-tokens"):
-            add("--max-prefill-tokens", "40960")          # adaptive_chunk 的 32768 档均分后每块最多约 37700 token
-        if not has("--cuda-graph-backend-prefill"):
-            add("--cuda-graph-backend-prefill", "breakable")
-        if not has("--cuda-graph-bs-prefill"):
-            add("--cuda-graph-bs-prefill", *_BUCKETS)
-        if not has("--kv-cache-dtype"):
-            add("--kv-cache-dtype", "fp8_e4m3" if os.environ.get("SGLANG_FP8_KV_HCU", "0") != "0" else "auto")
-        if not has("--numa-node") and _tp(argv) == 4 and _numa_nodes() == 4:
-            add("--numa-node", "0", "1", "2", "3")
-        try:
-            _cpu_governor()
-        except Exception as e:
-            print(f"[cpu_governor] ⚠ 检查失败: {type(e).__name__}: {e}", flush=True)
-        try:
-            _gpu_perflevel()
-        except Exception as e:
-            print(f"[gpu_perflevel] ⚠ 检查失败: {type(e).__name__}: {e}", flush=True)
-        if added:
-            print("[server_defaults] ✅ 已补齐未指定的启动参数: " + " | ".join(added), flush=True)
-        else:
-            print("[server_defaults] 启动参数均已由命令行给出，未补任何项", flush=True)
-        bad = {k: os.environ.get(k) for k, v in _MUST_ENV.items() if os.environ.get(k) != v}
-        if bad:
-            print(f"[server_defaults] ⚠ 关键环境变量缺失或不同: {bad}。请用 start_server.sh 启动，或使用已内置 ENV 的镜像；"
-                  "缺 GPU_MAX_HW_QUEUES=2 时 decode 可慢数十倍", flush=True)
-        return orig(argv)
-
-    mod.prepare_server_args = prepare_server_args
-    mod._server_defaults_installed = True
-    print("[server_defaults] 已安装", flush=True)
+    def add(*items):
+        argv.extend(items); added.append(" ".join(items))
+    if not has("--page-size"):
+        add("--page-size", "64")
+    if not has("--disable-custom-all-reduce", "--custom-all-reduce-backend"):
+        add("--disable-custom-all-reduce")
+    if not has("--warmups"):
+        add("--warmups", "prefill_shapes")
+    if not has("--prefill-max-requests"):
+        add("--prefill-max-requests", "2")
+    if not has("--max-prefill-tokens"):
+        add("--max-prefill-tokens", "40960")          # adaptive_chunk 的 32768 档均分后每块最多约 37700 token
+    if not has("--cuda-graph-backend-prefill"):
+        add("--cuda-graph-backend-prefill", "breakable")
+    if not has("--cuda-graph-bs-prefill"):
+        add("--cuda-graph-bs-prefill", *_BUCKETS)
+    if not has("--kv-cache-dtype"):
+        add("--kv-cache-dtype", "fp8_e4m3" if os.environ.get("SGLANG_FP8_KV_HCU", "0") != "0" else "auto")
+    if not has("--numa-node") and _tp(argv) == 4 and _numa_nodes() == 4:
+        add("--numa-node", "0", "1", "2", "3")
+    try:
+        _cpu_governor()
+    except Exception as e:
+        print(f"[cpu_governor] ⚠ 检查失败: {type(e).__name__}: {e}", flush=True)
+    try:
+        _gpu_perflevel()
+    except Exception as e:
+        print(f"[gpu_perflevel] ⚠ 检查失败: {type(e).__name__}: {e}", flush=True)
+    if added:
+        print("[server_defaults] ✅ 已补齐未指定的启动参数: " + " | ".join(added), flush=True)
+    else:
+        print("[server_defaults] 启动参数均已由命令行给出，未补任何项", flush=True)
+    bad = {k: os.environ.get(k) for k, v in _MUST_ENV.items() if os.environ.get(k) != v}
+    if bad:
+        print(f"[server_defaults] ⚠ 关键环境变量缺失或不同: {bad}。请用 start_server.sh 启动，或使用已内置 ENV 的镜像；"
+              "缺 GPU_MAX_HW_QUEUES=2 时 decode 可慢数十倍", flush=True)
+    return argv
