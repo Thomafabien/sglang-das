@@ -20,7 +20,9 @@
 import os
 import torch, triton, triton.language as tl
 
-_enabled = os.environ.get("SGLANG_MOE_PACK_W13", "0") != "0"
+from sglang.srt.environ import envs
+
+_enabled = envs.SGLANG_MOE_PACK_W13.get()
 BN, BK = 32, 128
 _REG = {}                 # data_ptr -> (BN, BK)
 _seen = {"pack": 0, "run": False}

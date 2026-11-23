@@ -82,9 +82,9 @@ _is_cpu_amx_available = cpu_has_amx_support()
 _is_hip = is_hip()
 _is_cpu = is_cpu()
 _is_npu = is_npu()
-_use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
-_enable_moe_pack_w13 = get_bool_env_var("SGLANG_MOE_PACK_W13")
-_enable_dense_pack = get_bool_env_var("SGLANG_DENSE_PACK")
+_use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
+_enable_moe_pack_w13 = envs.SGLANG_MOE_PACK_W13.get()
+_enable_dense_pack = envs.SGLANG_DENSE_PACK.get()
 
 if _use_aiter:
     from aiter.ops.shuffle import shuffle_weight

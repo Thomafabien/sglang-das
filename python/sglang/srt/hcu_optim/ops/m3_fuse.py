@@ -18,7 +18,9 @@
 """
 import os, torch, triton, triton.language as tl
 
-_MODE = os.environ.get("SGLANG_M3_FUSE", "0")
+from sglang.srt.environ import envs
+
+_MODE = envs.SGLANG_M3_FUSE.get().lower()
 _EVERY = int(os.environ.get("SGLANG_M3_FUSE_EVERY", "200"))
 _st = {"pending": None, "armed": False, "n": 0, "maxdiff": 0.0, "off": False}
 

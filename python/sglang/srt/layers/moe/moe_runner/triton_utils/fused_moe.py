@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import functools
-import os
 import sys
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -55,7 +54,7 @@ _is_hip = is_hip()
 _is_cuda = is_cuda()
 _is_cpu_amx_available = cpu_has_amx_support()
 _is_cpu = is_cpu()
-_use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
+_use_aiter = envs.SGLANG_USE_AITER.get() and _is_hip
 _is_xpu = is_xpu()
 _use_sgl_xpu = use_intel_xpu_backend()
 _is_musa = is_musa()
@@ -63,18 +62,18 @@ _is_hcu = is_hcu()
 _use_lightop = get_bool_env_var("SGLANG_USE_LIGHTOP")
 _use_aiter_moe = get_bool_env_var("SGLANG_ROCM_USE_AITER_MOE", default="true")
 _aiter_w4a16_moec_inplace_scale_keys: set[Any] = set()
-_enable_flat_hcu_silu_mul = get_bool_env_var("SGLANG_ACT_FLAT")
-_flat_hcu_silu_mul_min_m = int(os.environ.get("SGLANG_ACT_FLAT_MIN", "20000"))
-_flat_hcu_silu_mul_max_d = int(os.environ.get("SGLANG_ACT_FLAT_MAX_D", "256"))
-_flat_hcu_silu_mul_block = int(os.environ.get("SGLANG_ACT_FLAT_BLOCK", "1024"))
-_flat_hcu_silu_mul_warps = int(os.environ.get("SGLANG_ACT_FLAT_WARPS", "4"))
-_enable_m3_fused_sum_gate = get_bool_env_var("SGLANG_M3_FUSE")
+_enable_flat_hcu_silu_mul = envs.SGLANG_ACT_FLAT.get()
+_flat_hcu_silu_mul_min_m = envs.SGLANG_ACT_FLAT_MIN.get()
+_flat_hcu_silu_mul_max_d = envs.SGLANG_ACT_FLAT_MAX_D.get()
+_flat_hcu_silu_mul_block = envs.SGLANG_ACT_FLAT_BLOCK.get()
+_flat_hcu_silu_mul_warps = envs.SGLANG_ACT_FLAT_WARPS.get()
+_enable_m3_fused_sum_gate = (envs.SGLANG_M3_FUSE.get().lower() in ("1", "true"))
 _m3_sum_gate_active = False
 _m3_pending_reduce = None
 
 
 def invoke_fused_moe_kernel(*args, **kwargs):
-    if get_bool_env_var("SGLANG_MOE_PACK_W13"):
+    if envs.SGLANG_MOE_PACK_W13.get():
         from sglang.srt.hcu_optim.ops.moe_pack_w13 import (
             run_packed_w13_if_registered,
         )

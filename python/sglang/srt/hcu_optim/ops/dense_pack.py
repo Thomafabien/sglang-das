@@ -13,7 +13,9 @@
 import os
 import torch, triton, triton.language as tl
 
-_enabled = os.environ.get("SGLANG_DENSE_PACK", "0") != "0"
+from sglang.srt.environ import envs
+
+_enabled = envs.SGLANG_DENSE_PACK.get()
 PBN, PBK = 32, 128
 # (N, K) → (M 下限, M 上限)
 _WHITE = {(3072, 2048): (8, 64), (2560, 2048): (8, 64), (2048, 1024): (8, 64), (2048, 4096): (8, 32)}

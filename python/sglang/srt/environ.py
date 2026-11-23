@@ -522,6 +522,18 @@ class Envs:
 
     # AMD & ROCm
     SGLANG_USE_AITER = EnvBool(False)
+
+    # HCU MoE optimizations.
+    SGLANG_FAST_MOE_ALIGN = EnvBool(False)
+    SGLANG_ACT_FLAT = EnvBool(False)
+    SGLANG_ACT_FLAT_MIN = EnvInt(20000)
+    SGLANG_ACT_FLAT_MAX_D = EnvInt(256)
+    SGLANG_ACT_FLAT_BLOCK = EnvInt(1024)
+    SGLANG_ACT_FLAT_WARPS = EnvInt(4)
+    SGLANG_M3_FUSE = EnvStr("0")
+    SGLANG_MOE_PACK_W13 = EnvBool(False)
+    SGLANG_DENSE_PACK = EnvBool(False)
+    SGLANG_MOE_CONFIG_DIR = EnvStr(None)
     SGLANG_USE_AITER_AG = EnvBool(True)
     # Use reduce_scatter (instead of all_reduce + dp_scatter) for the equal-chunk
     # MAX_LEN DP-MoE combine. Default ON for ROCm/HIP (uses the aiter custom
