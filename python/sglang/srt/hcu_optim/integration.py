@@ -32,9 +32,6 @@ TARGETS = {
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),
         ("sglang.srt.hcu_optim.sched.adaptive_chunk", "SGLANG_ADAPTIVE_CHUNK"),
     ),
-    "sglang.srt.managers.tokenizer_manager": (
-        ("sglang.srt.hcu_optim.infra.tok_pool", "SGLANG_TOK_POOL"),
-    ),
 }
 
 

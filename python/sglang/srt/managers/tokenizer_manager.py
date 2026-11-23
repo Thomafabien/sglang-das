@@ -294,6 +294,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
         # Initialize tokenizer and multimodalprocessor
         self.init_tokenizer_and_processor()
+        self.maybe_init_tokenizer_pool()
 
         # Init inter-process communication
         self.init_ipc_channels(port_args)
@@ -726,7 +727,27 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
         # For true batches, return as-is
         return input_ids, token_type_ids
 
-    async def _tokenize_texts(
+    def maybe_init_tokenizer_pool(self):
+        self.tokenizer_pool = None
+        if envs.SGLANG_TOK_POOL.get() and self.tokenizer is not None:
+            from sglang.srt.managers.tokenizer_pool import TokenizerPool
+
+            self.tokenizer_pool = TokenizerPool(
+                path=self.server_args.tokenizer_path or self.server_args.model_path,
+                trust_remote_code=self.server_args.trust_remote_code,
+                min_chars=envs.SGLANG_TOK_POOL_MIN_CHARS.get(),
+                segments=envs.SGLANG_TOK_POOL_SEGS.get(),
+                log_count=envs.SGLANG_TOK_POOL_LOG_N.get(),
+            )
+
+    async def _tokenize_texts(self, texts, is_cross_encoder=False):
+        if self.tokenizer_pool is not None:
+            return await self.tokenizer_pool.tokenize(
+                texts, is_cross_encoder, self._tokenize_texts_default
+            )
+        return await self._tokenize_texts_default(texts, is_cross_encoder)
+
+    async def _tokenize_texts_default(
         self, texts: Union[str, List[str]], is_cross_encoder: bool = False
     ) -> Union[
         Tuple[List[int], Optional[List[int]]],
@@ -3227,8 +3248,3 @@ def stamp_http_worker_ipc(obj: Any, ipc_name: str) -> None:
             req.http_worker_ipc = ipc_name
     elif isinstance(obj, BaseBatchReq):
         obj.http_worker_ipcs = [ipc_name] * len(obj.rids)
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])
