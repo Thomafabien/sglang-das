@@ -513,6 +513,7 @@ class Scheduler(
         # Init schedule policy and new token estimation
         self.init_schedule_policy()
         self.maybe_init_adaptive_chunk_policy()
+        self.init_first_token_policy()
 
         # Init watchdog, memory saver, input blocker and recv skipper
         self.init_watch_dog_memory_saver_input_blocker()
@@ -1653,6 +1654,16 @@ class Scheduler(
                 self.invariant_checker.self_check_during_busy()
 
     @DynamicGradMode()
+    def init_first_token_policy(self):
+        from sglang.srt.managers.first_token_policy import FirstTokenPolicy
+
+        self.first_token_policy = FirstTokenPolicy(envs.SGLANG_FIRST_TOKEN_FIRST.get())
+        self.pair_prefill_policy = None
+        if self.first_token_policy.mode >= 2:
+            from sglang.srt.managers.pair_prefill_policy import PairPrefillPolicy
+
+            self.pair_prefill_policy = PairPrefillPolicy.from_env()
+
     def event_loop_overlap(self):
         """A scheduler loop that overlaps the CPU processing and GPU computation."""
         self.result_queue: Deque[
@@ -1676,20 +1687,43 @@ class Scheduler(
 
             self._apply_war_barrier()
 
-            # Get the next batch to run
-            plan = self.get_next_batch_to_run(
-                running_batch=self.running_batch, last_batch=self.last_batch
+            early = self.first_token_policy.should_flush(
+                self.last_batch, bool(self.result_queue)
             )
+            if early:
+                while self.result_queue:
+                    pop_and_process()
+                self.first_token_policy.after_flush(self.last_batch, self.tokenizer)
+
+            # Get the next batch to run
+            plan = (
+                self.pair_prefill_policy.take_plan()
+                if self.pair_prefill_policy is not None
+                else None
+            )
+            if plan is None:
+                plan = self.get_next_batch_to_run(
+                    running_batch=self.running_batch, last_batch=self.last_batch
+                )
             self.running_batch = plan.running_batch
             batch = plan.batch_to_run
             self.cur_batch_for_debug = batch
+            paired = None
+            if self.pair_prefill_policy is not None:
+                paired_plan, paired = self.pair_prefill_policy.plan_second(
+                    batch, self.chunked_req, self.running_batch, self.get_next_batch_to_run
+                )
+                if paired_plan is not None:
+                    self.running_batch = paired_plan.running_batch
             disable_overlap_for_batch = self.is_disable_overlap_for_batch(
                 batch, last_batch=self.last_batch
+            ) or self.first_token_policy.should_disable_overlap(
+                batch, self.last_batch, bool(self.result_queue)
             )
 
             # If we do not need to overlap the current batch with the last batch,
             # we can process the last batch immediately.
-            if disable_overlap_for_batch:
+            if disable_overlap_for_batch and not early:
                 pop_and_process()
                 # Opportunistic flush at the disable_overlap sync boundary:
                 # forward_stream is idle (prev forward drained, next not launched),
@@ -1701,7 +1735,15 @@ class Scheduler(
                         pass
 
             # Launch the current batch
-            if batch:
+            results_before_launch = len(self.result_queue)
+            if paired is not None:
+                first_result, batch_result = self.pair_prefill_policy.run(self, batch, paired)
+                self.result_queue.append((batch.copy(), first_result))
+                self.result_queue.append((paired.copy(), batch_result))
+                if self.is_generation:
+                    self.launch_batch_sample_if_needed(first_result, batch)
+                batch = paired
+            elif batch:
                 batch_result = self.run_batch(batch)
                 self.result_queue.append((batch.copy(), batch_result))
             else:
@@ -1709,8 +1751,9 @@ class Scheduler(
 
             # Process the last batch
             if self.last_batch:
-                if not disable_overlap_for_batch:
-                    pop_and_process()
+                if not disable_overlap_for_batch and not early:
+                    for _ in range(results_before_launch):
+                        pop_and_process()
             elif batch is None:
                 # When the server is idle, do self-check and re-init some states
                 self.on_idle()
@@ -2930,7 +2973,7 @@ class Scheduler(
 
     def get_new_batch_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
         if self.adaptive_chunk_policy is None:
-            return self._plan_new_batch_prefill(running_batch)
+            return self._plan_or_yield_prefill(running_batch)
 
         base = self.chunked_prefill_size
         self.chunked_prefill_size = self.adaptive_chunk_policy.choose(
@@ -2941,9 +2984,16 @@ class Scheduler(
             max_tokens=self.max_prefill_tokens,
         )
         try:
-            return self._plan_new_batch_prefill(running_batch)
+            return self._plan_or_yield_prefill(running_batch)
         finally:
             self.chunked_prefill_size = base
+
+    def _plan_or_yield_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
+        if self.first_token_policy.take_decode_turn(
+            running_batch, self.chunked_req is not None
+        ):
+            return NextBatchPlan(batch_to_run=None, running_batch=running_batch)
+        return self._plan_new_batch_prefill(running_batch)
 
     def _plan_new_batch_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
         prefill_delayer_single_pass = None
@@ -4640,8 +4690,3 @@ def run_scheduler_process(
             # and the synchronize() in destroy() could itself hang.
             if scheduler.gracefully_exit:
                 scheduler.release_host_resources()
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])

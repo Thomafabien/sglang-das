@@ -21,9 +21,6 @@ logger = logging.getLogger(__name__)
 # Every switch is opt-in.  Secondary tuning variables are documented in the
 # implementation module and in k100opt/SOURCE_INTEGRATION.md.
 TARGETS = {
-    "sglang.srt.managers.scheduler": (
-        ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),
-    ),
 }
 
 
