@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-import sys
 from array import array
 
 from sglang.srt.environ import envs
+from sglang.srt.managers.adaptive_prefill_policy import AdaptivePrefillPolicy
 from sglang.srt.managers.prefill_delayer import PrefillDelayerSinglePassExecutor
 from sglang.srt.utils import get_bool_env_var
 
@@ -542,6 +542,11 @@ class PrefillAdder:
         self.max_running_requests = max_running_requests
         self.prefill_context_parallel_enabled = is_prefill_context_parallel_enabled()
         self.prefill_max_requests = prefill_max_requests
+        self.adaptive_prefill_policy = (
+            AdaptivePrefillPolicy(prefill_max_requests)
+            if envs.SGLANG_ADAPTIVE_PMR.get() or envs.SGLANG_LONG_ADMIT.get()
+            else None
+        )
         self.prefill_delayer_single_pass = prefill_delayer_single_pass
         self.max_prefill_bs = max_prefill_bs
         # Snapshot of scheduler waiting_queue length at the start of this
@@ -977,6 +982,14 @@ class PrefillAdder:
     def add_one_req(
         self, req: Req, has_chunked_req: bool, truncation_align_size: Optional[int]
     ):
+        if self.adaptive_prefill_policy is not None:
+            if self.adaptive_prefill_policy.should_hold(
+                req, self.running_batch, self.can_run_list
+            ):
+                return AddReqResult.OTHER
+            self.prefill_max_requests = self.adaptive_prefill_policy.prefill_limit(
+                req, self.can_run_list
+            )
         if (self.prefill_delayer_single_pass is not None) and (
             not self.prefill_delayer_single_pass.negotiate_should_allow_prefill(
                 local_prefillable=True,
@@ -1220,8 +1233,3 @@ class PrefillAdder:
         self.running_batch.filter_batch(keep_indices=keep_indices)
         self.preempt_list.extend(preemptible_reqs)
         return True
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])

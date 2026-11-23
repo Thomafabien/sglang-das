@@ -28,10 +28,6 @@ TARGETS = {
     "sglang.srt.models.qwen3_5_mtp": (
         ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
     ),
-    "sglang.srt.managers.schedule_policy": (
-        ("sglang.srt.hcu_optim.sched.adaptive_pmr", "SGLANG_ADAPTIVE_PMR"),
-        ("sglang.srt.hcu_optim.sched.long_admit", "SGLANG_LONG_ADMIT"),
-    ),
     "sglang.srt.managers.scheduler": (
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),
         ("sglang.srt.hcu_optim.sched.adaptive_chunk", "SGLANG_ADAPTIVE_CHUNK"),
