@@ -38,7 +38,6 @@ MoE 与通信不可真并发（2026-09-19 定位，见 docs/技术报告 §7.4�
     已试并否决：用 IPC 映射 + 跨卡拷贝（拷贝引擎）替换 RCCL——结果逐位相同，但单独延迟 3.8 对 2.6 ms，交替时也不占优。
 开关 SGLANG_PAIR_PREFILL=1（默认 0）。运行时对照：存在 /tmp/pair_off 则不成对（first_token_first.py 里判定）。
 """
-import dataclasses
 import os
 import time
 
@@ -95,7 +94,6 @@ class _State:
     n_switch = 0
     logged = False
     n_safe = 0
-    safe_align = False
     noexcl = False
     toggles_logged = None
     evlog = {"A": [], "B": []}
@@ -197,53 +195,35 @@ def _pick_stream_B(F):
     return pick if pick is not None else cands[0]
 
 
-def _exclusive(fn):
-    """本块的注意力内核启动前，等另一块已入队的通信全部做完；配合严格交替（另一块的下一段计算要等本段结束），
-    该内核运行期间另一条流上没有任何工作。
-    原因（2026-09-19 二分）：12 万 token 以上的上下文里，成对发射的输出不可复现（同一提示词三次三个样），
-    而「两块共用一条流」「两条流但 GPU 全串行」两种对照都与不成对逐字相同；通信换回 bf16 后仍不可复现。
-    即：一块的 RCCL 通信与另一块的计算在 GPU 上真并发时，计算结果会偶发出错；只在全注意力内核很长（上下文很长）时出现。"""
-    def w(*a, **kw):
-        if S.active and S.role is not None and _NSTREAMS >= 2 and not S.noexcl:
-            oc = S.ev_comm.get("B" if S.role == "A" else "A")
-            if oc is not None:
-                torch.cuda.current_stream().wait_event(oc)
-            if not S.excl_logged:
-                S.excl_logged = True
-                print("[pair_prefill] ✅ 首次真正生效：注意力内核启动前等待另一块的通信结束", flush=True)
-        return fn(*a, **kw)
-    return w
+def uses_private_eager_input():
+    return S.active and S.role is not None
 
 
-def _install_safe_align():
-    if not _SAFE_ALIGN:
-        return
-    try:
-        import sglang.srt.layers.moe.moe_runner.triton_utils.fused_moe as FM
-        from ..ops.safe_align import safe_moe_align_block_size
-    except Exception as e:
-        print(f"[pair_prefill] ⚠ 并发安全对齐不可用（{type(e).__name__}: {e}），成对期间仍用原实现", flush=True)
-        return
-    orig = FM.moe_align_block_size
-    if getattr(orig, "_pp_safe", False):
-        return
+def wait_for_exclusive_attention(backend):
+    if (
+        S.active and S.role is not None and _NSTREAMS >= 2
+        and not S.noexcl and type(backend).__name__ in _EXCL_BACKENDS
+    ):
+        event = S.ev_comm.get("B" if S.role == "A" else "A")
+        if event is not None:
+            torch.cuda.current_stream().wait_event(event)
 
-    def dispatch(topk_ids, block_size, num_experts, *a, **kw):
-        if S.active and not os.path.exists(_LIGHTOP_FILE):
-            S.n_safe += 1
-            if S.n_safe == 1:
-                print(f"[pair_prefill] ✅ 首次真正生效（并发安全对齐）：topk_ids {tuple(topk_ids.shape)} 块长 {block_size}", flush=True)
-            return safe_moe_align_block_size(topk_ids, block_size, num_experts, *a, **kw)
-        return orig(topk_ids, block_size, num_experts, *a, **kw)
-    dispatch._pp_safe = True
-    FM.moe_align_block_size = dispatch
-    S.safe_align = True
-    print(f"[pair_prefill] 已安装：成对期间 MoE 对齐排序走并发安全实现（原实现 {getattr(orig, '__qualname__', orig)}）；"
-          f"MoE 段与通信重叠={'开' if _MOE_OVERLAP else '关'}", flush=True)
+
+def prepare_draft_extend():
+    if not S.active or S.role is None:
+        return
+    disable_handoff_in_current()
+    if S.role == "A" and _NSTREAMS >= 2 and S.ev_comm.get("B") is not None:
+        torch.cuda.current_stream().wait_event(S.ev_comm["B"])
+    if S.role == "B" and S.stream_A is not None:
+        torch.cuda.current_stream().wait_stream(S.stream_A)
+
+
+def requires_safe_alignment():
+    return _SAFE_ALIGN and S.active and not os.path.exists(_LIGHTOP_FILE)
 
 
 def _setup_once(sched):
-    _install_safe_align()
     S.stream_B = _pick_stream_B(sched.forward_stream)
     try:
         mw0 = sched.model_worker
@@ -256,47 +236,6 @@ def _setup_once(sched):
     tgt = getattr(mw, "target_worker", mw)
     ab = tgt.model_runner.attn_backend
     S.backends = [ab] + list(getattr(ab, "attn_backend_list", []))
-    # 图外执行器的 load_batch 把每批输入拷进固定的静态缓冲并返回其视图；两批交错时后一批会覆盖前一批仍在用的缓冲
-    # （KV 写入位置、长度等）。成对期间各持副本，等价于框架的 SGLANG_EAGER_INPUT_NO_COPY 路径。
-    er = getattr(tgt.model_runner, "eager_runner", None)
-    if er is not None and not getattr(er, "_pp_wrapped", False):
-        orig_lb = er.load_batch
-
-        def _load_batch(forward_batch, *a, **kw):
-            if S.active and S.role is not None:
-                return dataclasses.replace(forward_batch)
-            return orig_lb(forward_batch, *a, **kw)
-
-        er.load_batch = _load_batch
-        er._pp_wrapped = True
-    # 全注意力内核独占 GPU：见 _exclusive 的说明
-    n_ex = 0
-    for b in S.backends:
-        if type(b).__name__ in _EXCL_BACKENDS and not getattr(b, "_pp_excl", False):
-            b.forward_extend = _exclusive(b.forward_extend)
-            b._pp_excl = True
-            n_ex += 1
-    print(f"[pair_prefill] 挂钩：{n_ex} 个注意力后端的预填充内核独占 GPU（{sorted(_EXCL_BACKENDS)}）", flush=True)
-    print(f"[pair_prefill] 挂钩：后端 {[type(b).__name__ for b in S.backends]}；"
-          f"静态输入缓冲绕过={'已装' if er is not None else '未找到 eager_runner'}；"
-          f"worker={type(mw).__name__} target={type(tgt).__name__}", flush=True)
-    dw = getattr(mw, "draft_worker", None)
-    if dw is not None and hasattr(dw, "_draft_extend_for_prefill") and not getattr(dw, "_pp_wrapped", False):
-        orig = dw._draft_extend_for_prefill
-
-        def _wrapped(*a, **kw):
-            disable_handoff_in_current()            # 草稿层扩展独占执行，不在其 all_reduce 处交接
-            if S.active and S.role == "A" and _NSTREAMS >= 2 and S.ev_comm.get("B") is not None:
-                torch.cuda.current_stream().wait_event(S.ev_comm["B"])     # 草稿层里也有 MoE：避开块 B 最后一次通信
-            if S.active and S.role == "B" and S.stream_A is not None:
-                # 块 B 的草稿层要读块 A 的草稿 KV，而块 A 的草稿层扩展排在它的目标前向之后、不在逐段完成事件的覆盖范围内。
-                # 此时块 A 的协程已结束（全部工作已入队），等它的流即可。
-                torch.cuda.current_stream().wait_stream(S.stream_A)
-            return orig(*a, **kw)
-
-        dw._draft_extend_for_prefill = _wrapped
-        dw._pp_wrapped = True
-    print(f"[pair_prefill] 挂钩：草稿层扩展不交接={'已装' if dw is not None and getattr(dw, '_pp_wrapped', False) else '未装'}", flush=True)
 
 
 def _report_timing(tl, t_start):

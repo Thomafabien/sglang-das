@@ -938,7 +938,15 @@ def _prepare_fused_moe_run(
         and down_config.pop("USE_TMA", False)
     )
 
-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+    align = moe_align_block_size
+    if envs.SGLANG_PAIR_PREFILL.get():
+        from sglang.srt.hcu_optim.sched.pair_prefill import requires_safe_alignment
+
+        if requires_safe_alignment():
+            from sglang.srt.hcu_optim.ops.safe_align import safe_moe_align_block_size
+
+            align = safe_moe_align_block_size
+    sorted_token_ids, expert_ids, num_tokens_post_padded = align(
         topk_ids, config["BLOCK_SIZE_M"], E
     )
 

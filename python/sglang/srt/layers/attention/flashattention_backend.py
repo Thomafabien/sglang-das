@@ -1114,6 +1114,12 @@ class FlashAttentionBackend(AttentionBackend):
         k_rope: Optional[torch.Tensor] = None,
         sinks: Optional[torch.Tensor] = None,
     ):
+        from sglang.srt.environ import envs
+
+        if envs.SGLANG_PAIR_PREFILL.get():
+            from sglang.srt.hcu_optim.sched.pair_prefill import wait_for_exclusive_attention
+
+            wait_for_exclusive_attention(self)
         is_cp_mode = (
             forward_batch.forward_mode.is_context_parallel_extend()
             and forward_batch.attn_cp_metadata is not None

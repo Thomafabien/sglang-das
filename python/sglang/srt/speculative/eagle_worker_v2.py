@@ -847,6 +847,10 @@ class EagleDraftWorker(EagleDraftWorkerBase):
             next_token_ids: Next token ids generated from the target forward.
         """
         # Construct input_ids
+        if envs.SGLANG_PAIR_PREFILL.get():
+            from sglang.srt.hcu_optim.sched.pair_prefill import prepare_draft_extend
+
+            prepare_draft_extend()
         if not batch.forward_mode.is_idle():
             # Chunked-prefill-aware tail tokens (see PR #26329).
             tail_tokens = _eagle_prefill_tail_tokens(batch, next_token_ids)

@@ -1752,8 +1752,11 @@ class Scheduler(
             # Process the last batch
             if self.last_batch:
                 if not disable_overlap_for_batch and not early:
-                    for _ in range(results_before_launch):
+                    if self.first_token_policy.mode < 2:
                         pop_and_process()
+                    else:
+                        for _ in range(results_before_launch):
+                            pop_and_process()
             elif batch is None:
                 # When the server is idle, do self-check and re-init some states
                 self.on_idle()

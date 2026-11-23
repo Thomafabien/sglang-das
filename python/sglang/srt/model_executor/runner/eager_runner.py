@@ -175,6 +175,11 @@ class EagerRunner(BaseRunner):
         load_batch."""
         if envs.SGLANG_EAGER_INPUT_NO_COPY.get():
             return replace(forward_batch)
+        if envs.SGLANG_PAIR_PREFILL.get():
+            from sglang.srt.hcu_optim.sched.pair_prefill import uses_private_eager_input
+
+            if uses_private_eager_input():
+                return replace(forward_batch)
         raw_bs = forward_batch.batch_size
         if forward_batch.input_ids is not None:
             raw_num_tokens = forward_batch.input_ids.shape[0]
