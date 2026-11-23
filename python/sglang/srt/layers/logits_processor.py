@@ -15,7 +15,6 @@
 
 import dataclasses
 import logging
-import sys
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -905,6 +904,26 @@ class LogitsProcessor(nn.Module):
         last position (e.g., extend without input logprobs). The caller should
         guarantee the given hidden_states follow this constraint.
         """
+        skip_tp_gather = False
+        if getattr(self, "_kp_vpa", False):
+            if not logits_metadata.extend_return_logprob:
+                from sglang.srt.hcu_optim.ops.vocab_par_draft import _eligible
+
+                skip_tp_gather = _eligible(self, lm_head)
+        elif (
+            envs.SGLANG_VPA_VERIFY.get()
+            and logits_metadata.forward_mode is not None
+            and logits_metadata.forward_mode.is_target_verify()
+        ):
+            from sglang.srt.hcu_optim.ops.vocab_par_verify import (
+                _eligible,
+                compute_sharded_verify_logits,
+            )
+
+            if _eligible(self, lm_head):
+                return compute_sharded_verify_logits(
+                    self, hidden_states, lm_head, logits_metadata, embedding_bias
+                )
         hidden_states, local_hidden_states = self._gather_dp_attn_hidden_states(
             hidden_states, logits_metadata
         )
@@ -914,7 +933,7 @@ class LogitsProcessor(nn.Module):
         if self.logit_scale is not None:
             logits.mul_(self.logit_scale)
 
-        if self.do_tensor_parallel_all_gather:
+        if self.do_tensor_parallel_all_gather and not skip_tp_gather:
             if self.use_attn_tp_group:
                 logits = self._gather_attn_tp_logits(logits)
             else:
@@ -1170,8 +1189,3 @@ class LogitsProcessor(nn.Module):
             # They should be moved to GenerationBatchResult to keep this class clean.
             mm_input_embeds=logits_metadata.mm_input_embeds,
         )
-
-
-from sglang.srt.hcu_optim.integration import apply_for_module as _apply_hcu_optim
-
-_apply_hcu_optim(sys.modules[__name__])

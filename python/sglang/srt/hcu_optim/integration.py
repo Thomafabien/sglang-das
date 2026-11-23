@@ -21,13 +21,6 @@ logger = logging.getLogger(__name__)
 # Every switch is opt-in.  Secondary tuning variables are documented in the
 # implementation module and in k100opt/SOURCE_INTEGRATION.md.
 TARGETS = {
-    "sglang.srt.layers.logits_processor": (
-        ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
-        ("sglang.srt.hcu_optim.ops.vocab_par_verify", "SGLANG_VPA_VERIFY"),
-    ),
-    "sglang.srt.models.qwen3_5_mtp": (
-        ("sglang.srt.hcu_optim.ops.vocab_par_draft", "SGLANG_VPA_DRAFT"),
-    ),
     "sglang.srt.managers.scheduler": (
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),
     ),

@@ -615,6 +615,8 @@ class Envs:
     SGLANG_SERVER_DEFAULTS = EnvBool(False)
     SGLANG_WARM_BATCH = EnvBool(False)
     SGLANG_TOK_POOL = EnvBool(False)
+    SGLANG_VPA_DRAFT = EnvBool(False)
+    SGLANG_VPA_VERIFY = EnvBool(False)
     SGLANG_TOK_POOL_MIN_CHARS = EnvInt(16000)
     SGLANG_TOK_POOL_SEGS = EnvInt(12)
     SGLANG_TOK_POOL_LOG_N = EnvInt(20)

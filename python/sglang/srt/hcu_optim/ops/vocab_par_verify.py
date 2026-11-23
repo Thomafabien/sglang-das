@@ -65,39 +65,25 @@ def _eligible(proc, lm_head):
     return ok
 
 
-def _install_logits(mod):
-    LP = mod.LogitsProcessor
-    if getattr(LP, "_kp_vpv_installed", False):
-        return
-    orig = LP._get_logits
-
-    def _get_logits(self, hidden_states, lm_head, logits_metadata, embedding_bias=None):
-        fm = getattr(logits_metadata, "forward_mode", None)
-        if (not getattr(self, "_kp_vpa", False) and fm is not None and fm.is_target_verify()
-                and _eligible(self, lm_head)):
-            from sglang.srt.distributed import get_tp_group
-            from .vocab_par_draft import local_reduce
-            g = get_tp_group()
-            local = self._compute_lm_head(hidden_states, lm_head, embedding_bias)       # [M, W] 本卡分片
-            if local.stride(-1) != 1 or local.stride(0) != local.shape[1]:
-                local = local.contiguous()                                               # 内核按行连续取数
-            M, Wd = local.shape
-            buf = getattr(logits_metadata, "next_token_logits_buffer", None)
-            if buf is not None and buf.dim() == 2 and buf.shape[0] == M and buf.shape[1] >= Wd + 1 and buf.dtype == torch.float32:
-                out = buf[:, : Wd + 1]                                                 # 共享缓冲的视图，不新增显存
-            else:
-                out = torch.empty(M, Wd + 1, device=local.device, dtype=torch.float32)
-            out[:, :Wd].copy_(local)
-            part = local_reduce(local)
-            gathered = torch.empty(g.world_size * M, 3, device=part.device, dtype=part.dtype)
-            g.all_gather_into_tensor(gathered, part)                                     # [W*M, 3]，绕开 HCU reshape 分支
-            _combine_into[(M,)](gathered, out, M, Wd, out.stride(0), W=g.world_size)
-            return out
-        return orig(self, hidden_states, lm_head, logits_metadata, embedding_bias)
-
-    LP._get_logits = _get_logits
-    LP._kp_vpv_installed = True
-    print(f"[vocab_par_verify] 已安装到 {mod.__name__} (pid={os.getpid()})", flush=True)
+def compute_sharded_verify_logits(self, hidden_states, lm_head, logits_metadata, embedding_bias):
+    from sglang.srt.distributed import get_tp_group
+    from .vocab_par_draft import local_reduce
+    g = get_tp_group()
+    local = self._compute_lm_head(hidden_states, lm_head, embedding_bias)       # [M, W] 本卡分片
+    if local.stride(-1) != 1 or local.stride(0) != local.shape[1]:
+        local = local.contiguous()                                               # 内核按行连续取数
+    M, Wd = local.shape
+    buf = getattr(logits_metadata, "next_token_logits_buffer", None)
+    if buf is not None and buf.dim() == 2 and buf.shape[0] == M and buf.shape[1] >= Wd + 1 and buf.dtype == torch.float32:
+        out = buf[:, : Wd + 1]                                                 # 共享缓冲的视图，不新增显存
+    else:
+        out = torch.empty(M, Wd + 1, device=local.device, dtype=torch.float32)
+    out[:, :Wd].copy_(local)
+    part = local_reduce(local)
+    gathered = torch.empty(g.world_size * M, 3, device=part.device, dtype=part.dtype)
+    g.all_gather_into_tensor(gathered, part)                                     # [W*M, 3]，绕开 HCU reshape 分支
+    _combine_into[(M,)](gathered, out, M, Wd, out.stride(0), W=g.world_size)
+    return out
 
 
 def _need_full(batch, vocab_mask, eu):
@@ -156,11 +142,3 @@ def sample_sharded_verify(orig, verify_input, batch, logits_output, vocab_mask=N
     if _ST["fb"][why] == 1:                          # 每种原因首次出现都打印
         print(f"[vocab_par_verify] 回退全收集: 原因={why}（该原因首次）pid={os.getpid()}", flush=True)
     return orig(verify_input, batch, logits_output, vocab_mask)
-
-
-def install(mod):
-    n = mod.__name__
-    if n.endswith("logits_processor"):
-        _install_logits(mod)
-    else:
-        raise RuntimeError(f"未知目标模块 {n}")
