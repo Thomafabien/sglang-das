@@ -512,6 +512,7 @@ class Scheduler(
 
         # Init schedule policy and new token estimation
         self.init_schedule_policy()
+        self.maybe_init_adaptive_chunk_policy()
 
         # Init watchdog, memory saver, input blocker and recv skipper
         self.init_watch_dog_memory_saver_input_blocker()
@@ -2919,7 +2920,32 @@ class Scheduler(
         res = min(res, self.req_to_token_pool.available_size())
         return res
 
+    def maybe_init_adaptive_chunk_policy(self):
+        from sglang.srt.hcu_optim.integration import is_enabled
+        from sglang.srt.managers.chunk_policy import AdaptiveChunkPolicy
+
+        self.adaptive_chunk_policy = AdaptiveChunkPolicy.from_env(
+            pair_prefill=is_enabled("SGLANG_PAIR_PREFILL")
+        )
+
     def get_new_batch_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
+        if self.adaptive_chunk_policy is None:
+            return self._plan_new_batch_prefill(running_batch)
+
+        base = self.chunked_prefill_size
+        self.chunked_prefill_size = self.adaptive_chunk_policy.choose(
+            base=base,
+            chunked_req=self.chunked_req,
+            waiting_queue=self.waiting_queue,
+            page_size=self.page_size,
+            max_tokens=self.max_prefill_tokens,
+        )
+        try:
+            return self._plan_new_batch_prefill(running_batch)
+        finally:
+            self.chunked_prefill_size = base
+
+    def _plan_new_batch_prefill(self, running_batch: ScheduleBatch) -> NextBatchPlan:
         prefill_delayer_single_pass = None
         if self.prefill_delayer:
             # Get max usage across all pools for prefill delay decision

@@ -30,7 +30,6 @@ TARGETS = {
     ),
     "sglang.srt.managers.scheduler": (
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),
-        ("sglang.srt.hcu_optim.sched.adaptive_chunk", "SGLANG_ADAPTIVE_CHUNK"),
     ),
 }
 
