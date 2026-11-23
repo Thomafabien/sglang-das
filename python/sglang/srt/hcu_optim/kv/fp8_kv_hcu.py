@@ -189,21 +189,7 @@ def _is_hcu():
         return False
 
 
-def _install_overrides(mod):
-    if getattr(mod, "_fp8_kv_hcu_installed", False):
-        return
-    orig = mod._attention_backend_fa3_fp8_fallback
 
-    def patched(view):
-        if _is_hcu() and view.attention_backend == "fa3" and view.kv_cache_dtype in ("fp8_e5m2", "fp8_e4m3"):
-            print("[fp8_kv_hcu] 保留 attention_backend=fa3（海光 fa3 即厂商 flash-attn，其 paged 内核认 e5m2），"
-                  "跳过「fa3+fp8_e5m2→triton」回退", flush=True)
-            return {}
-        return orig(view)
-
-    mod._attention_backend_fa3_fp8_fallback = patched
-    mod._fp8_kv_hcu_installed = True
-    print(f"[fp8_kv_hcu] 已安装到 {mod.__name__}（fa3 回退规则） pid={os.getpid()}", flush=True)
 
 
 def _load_pa(sq):
@@ -283,161 +269,130 @@ def _try_own(q, k, v, bt, kw, mq, bs):
         return None
 
 
-def _install_server_args(mod):
-    """放行 fp8_e4m3。gfx928 上 `is_hcu_native_fp8_supported()` 为假（它只认 gfx938），
-    于是 server_args.py:5053 取 HCU_GENERIC_KV_CACHE_DTYPE_CHOICES（不含 e4m3）并抛 ValueError。
-    厂商内核确实读不了 e4m3，但我们的自写内核可以，所以把 e4m3 加进这张白名单。
-    注意 HCU_NATIVE_... 在模块加载时已展开，改 GENERIC 不影响它。"""
-    if getattr(mod, "_fp8_kv_hcu_installed", False):
-        return
-    old = getattr(mod, "HCU_GENERIC_KV_CACHE_DTYPE_CHOICES", None)
-    if old is None:
-        print("[fp8_kv_hcu] ⚠ 未找到 HCU_GENERIC_KV_CACHE_DTYPE_CHOICES，e4m3 闸门未放行", flush=True)
-        return
-    if "fp8_e4m3" not in old:
-        mod.HCU_GENERIC_KV_CACHE_DTYPE_CHOICES = set(old) | {"fp8_e4m3"}
-        print(f"[fp8_kv_hcu] 已放行 fp8_e4m3（白名单 {sorted(old)} → 追加 fp8_e4m3） pid={os.getpid()}", flush=True)
-    mod._fp8_kv_hcu_installed = True
-
-
-def _install_interface(mod):
-    if getattr(mod, "_fp8_kv_hcu_installed", False):
-        return
-    orig = mod.vllm_flash_attn_varlen_func_interface
-
-    def wrapped(*args, **kw):
-        k = kw.get("k", args[1] if len(args) > 1 else None)
-        bt = kw.get("block_table")
-        if k is None or k.dtype not in _FP8 or bt is None:
-            return orig(*args, **kw)
-        q = kw.get("q", args[0] if args else None)
-        v = kw.get("v", args[2] if len(args) > 2 else None)
-        cu_q = kw.get("cu_seqlens_q")
-        mq = kw.get("max_seqlen_q")
-        ws = kw.get("window_size")
-        w0 = -1 if ws is None else ws[0]
-        bs = cu_q.shape[0] - 1
-        is_mtp = (mq * bs == q.shape[0] and 1 < mq < 5)
-        # 路由取证（SGLANG_PA_TRACE=1）：每种 (mq, bs, total_q, causal) 组合打一次，最多 12 种
-        if _TRACE and int(mq) <= 64 and len(_route_seen) < 12 and not torch.cuda.is_current_stream_capturing() and kw.get("seqused_k") is not None and int(kw["seqused_k"][0]) > 10000:
-            key = (int(mq), int(bs), int(q.shape[0]), bool(kw.get("causal", False)))
-            if key not in _route_seen:
-                _route_seen.add(key)
-                print(f"[fp8_kv_hcu][route] varlen: mq={mq} bs={bs} total_q={q.shape[0]} q={tuple(q.shape)} K={tuple(k.shape)} {k.dtype} "
-                      f"causal={kw.get('causal')} is_mtp={is_mtp} w0={w0} seqused[:2]={kw.get('seqused_k')[:2].tolist() if kw.get('seqused_k') is not None else None} pid={os.getpid()}", flush=True)
-        if (mq == 1 or is_mtp) and w0 == -1:
-            # decode 路径。形状吻合时用自写内核（verify 步 q=4 / 每卡 1 个 kv 头 / hd 256 / page 64），
-            # 否则回退厂商 paged_attention：它只对 e5m2 正确，e4m3 会算错，故下面对 e4m3 直接报错。
-            own = _try_own(q, k, v, bt, kw, mq, bs)
-            if own is not None:
-                if _CHECK and _chk_n[0] < _CHECK:
-                    _chk_n[0] += 1
-                    try:
-                        import torch as _t
-                        ref = orig(*args, **kw)
-                        r = ref[0] if isinstance(ref, (tuple, list)) else ref
-                        d = (own.float() - r.float())
-                        rel = (d.pow(2).mean().sqrt() / r.float().pow(2).mean().sqrt()).item()
-                        sq = kw.get("seqused_k")
-                        print(f"[pa_check#{_chk_n[0]}] bs={bs} q={tuple(q.shape)} 页表宽={bt.shape[1]} "
-                              f"seqused={sq[:4].tolist() if sq is not None else None} "
-                              f"最大差={d.abs().max().item():.4e} 相对RMS={rel:.4e} "
-                              f"本核absmax={own.float().abs().max().item():.4e} 厂商absmax={r.float().abs().max().item():.4e}",
-                              flush=True)
-                    except Exception as e:
-                        print(f"[pa_check] 对拍失败: {type(e).__name__}: {e}", flush=True)
-                return own
-            ext_out = _try_ext(q, k, v, bt, cu_q, kw, mq, bs)
-            if ext_out is not None:
-                return ext_out
-            if k.dtype is torch.float8_e4m3fn:
-                # 厂商 paged_attention 的 fp8 内核只对 e5m2 算对，e4m3 会输出错误结果（不是变慢）。
-                # 走到这里说明自写内核未接这个形状，宁可失败也不能返回错误数值。
-                raise RuntimeError(
-                    f"[fp8_kv_hcu] decode 形状未被自写内核接管而 KV 为 e4m3，厂商内核对该格式不正确："
-                    f"q={tuple(q.shape)} max_seqlen_q={mq} bs={bs} K={tuple(k.shape)}。"
-                    f" 请检查 .so 是否编译（bash kernels/build.sh），或改用 SGLANG_PA_FMT=e5m2 / KV_DTYPE=auto。")
-            if not _seen["direct"]:
-                _seen["direct"] = True
-                print(f"[fp8_kv_hcu] 首次真正生效(decode 走厂商 paged_attention): q={tuple(q.shape)} "
-                      f"max_seqlen_q={mq} bs={bs} K={tuple(k.shape)} {k.dtype} pid={os.getpid()}", flush=True)
-            return orig(*args, **kw)
-        # 草稿扩展（max_seqlen_q ≤ 4）：split-KV 专用核；否则预填充走自写 prefill 内核；都不吻合则反量化后走 bf16 厂商
+def dispatch_varlen(orig, *args, **kw):
+    k = kw.get("k", args[1] if len(args) > 1 else None)
+    bt = kw.get("block_table")
+    if k is None or k.dtype not in _FP8 or bt is None:
+        return orig(*args, **kw)
+    q = kw.get("q", args[0] if args else None)
+    v = kw.get("v", args[2] if len(args) > 2 else None)
+    cu_q = kw.get("cu_seqlens_q")
+    mq = kw.get("max_seqlen_q")
+    ws = kw.get("window_size")
+    w0 = -1 if ws is None else ws[0]
+    bs = cu_q.shape[0] - 1
+    is_mtp = (mq * bs == q.shape[0] and 1 < mq < 5)
+    # 路由取证（SGLANG_PA_TRACE=1）：每种 (mq, bs, total_q, causal) 组合打一次，最多 12 种
+    if _TRACE and int(mq) <= 64 and len(_route_seen) < 12 and not torch.cuda.is_current_stream_capturing() and kw.get("seqused_k") is not None and int(kw["seqused_k"][0]) > 10000:
+        key = (int(mq), int(bs), int(q.shape[0]), bool(kw.get("causal", False)))
+        if key not in _route_seen:
+            _route_seen.add(key)
+            print(f"[fp8_kv_hcu][route] varlen: mq={mq} bs={bs} total_q={q.shape[0]} q={tuple(q.shape)} K={tuple(k.shape)} {k.dtype} "
+                  f"causal={kw.get('causal')} is_mtp={is_mtp} w0={w0} seqused[:2]={kw.get('seqused_k')[:2].tolist() if kw.get('seqused_k') is not None else None} pid={os.getpid()}", flush=True)
+    if (mq == 1 or is_mtp) and w0 == -1:
+        # decode 路径。形状吻合时用自写内核（verify 步 q=4 / 每卡 1 个 kv 头 / hd 256 / page 64），
+        # 否则回退厂商 paged_attention：它只对 e5m2 正确，e4m3 会算错，故下面对 e4m3 直接报错。
+        own = _try_own(q, k, v, bt, kw, mq, bs)
+        if own is not None:
+            if _CHECK and _chk_n[0] < _CHECK:
+                _chk_n[0] += 1
+                try:
+                    import torch as _t
+                    ref = orig(*args, **kw)
+                    r = ref[0] if isinstance(ref, (tuple, list)) else ref
+                    d = (own.float() - r.float())
+                    rel = (d.pow(2).mean().sqrt() / r.float().pow(2).mean().sqrt()).item()
+                    sq = kw.get("seqused_k")
+                    print(f"[pa_check#{_chk_n[0]}] bs={bs} q={tuple(q.shape)} 页表宽={bt.shape[1]} "
+                          f"seqused={sq[:4].tolist() if sq is not None else None} "
+                          f"最大差={d.abs().max().item():.4e} 相对RMS={rel:.4e} "
+                          f"本核absmax={own.float().abs().max().item():.4e} 厂商absmax={r.float().abs().max().item():.4e}",
+                          flush=True)
+                except Exception as e:
+                    print(f"[pa_check] 对拍失败: {type(e).__name__}: {e}", flush=True)
+            return own
         ext_out = _try_ext(q, k, v, bt, cu_q, kw, mq, bs)
         if ext_out is not None:
             return ext_out
-        pp_out = _try_pp(q, k, v, bt, cu_q, kw, mq, bs)
-        if pp_out is not None:
-            return pp_out
-        P = bt.shape[1]
-        idx = bt.reshape(-1).long()
-        kd = k[idx].to(torch.bfloat16)
-        vd = v[idx].to(torch.bfloat16)
-        nbt = torch.arange(bs * P, device=bt.device, dtype=torch.int32).view(bs, P)
-        if not _seen["dequant"]:
-            _seen["dequant"] = True
-            print(f"[fp8_kv_hcu] 首次真正生效(prefill 反量化): q={tuple(q.shape)} max_seqlen_q={mq} bs={bs} "
-                  f"页数={P} K池={tuple(k.shape)} {k.dtype} → 临时 bf16 {tuple(kd.shape)} "
-                  f"capturing={torch.cuda.is_current_stream_capturing()} pid={os.getpid()}", flush=True)
-        kw2 = dict(kw)
-        kw2["q"], kw2["k"], kw2["v"], kw2["block_table"] = q, kd, vd, nbt
-        return orig(*args[3:], **kw2) if len(args) > 3 else orig(**kw2)
+        if k.dtype is torch.float8_e4m3fn:
+            # 厂商 paged_attention 的 fp8 内核只对 e5m2 算对，e4m3 会输出错误结果（不是变慢）。
+            # 走到这里说明自写内核未接这个形状，宁可失败也不能返回错误数值。
+            raise RuntimeError(
+                f"[fp8_kv_hcu] decode 形状未被自写内核接管而 KV 为 e4m3，厂商内核对该格式不正确："
+                f"q={tuple(q.shape)} max_seqlen_q={mq} bs={bs} K={tuple(k.shape)}。"
+                f" 请检查 .so 是否编译（bash kernels/build.sh），或改用 SGLANG_PA_FMT=e5m2 / KV_DTYPE=auto。")
+        if not _seen["direct"]:
+            _seen["direct"] = True
+            print(f"[fp8_kv_hcu] 首次真正生效(decode 走厂商 paged_attention): q={tuple(q.shape)} "
+                  f"max_seqlen_q={mq} bs={bs} K={tuple(k.shape)} {k.dtype} pid={os.getpid()}", flush=True)
+        return orig(*args, **kw)
+    # 草稿扩展（max_seqlen_q ≤ 4）：split-KV 专用核；否则预填充走自写 prefill 内核；都不吻合则反量化后走 bf16 厂商
+    ext_out = _try_ext(q, k, v, bt, cu_q, kw, mq, bs)
+    if ext_out is not None:
+        return ext_out
+    pp_out = _try_pp(q, k, v, bt, cu_q, kw, mq, bs)
+    if pp_out is not None:
+        return pp_out
+    P = bt.shape[1]
+    idx = bt.reshape(-1).long()
+    kd = k[idx].to(torch.bfloat16)
+    vd = v[idx].to(torch.bfloat16)
+    nbt = torch.arange(bs * P, device=bt.device, dtype=torch.int32).view(bs, P)
+    if not _seen["dequant"]:
+        _seen["dequant"] = True
+        print(f"[fp8_kv_hcu] 首次真正生效(prefill 反量化): q={tuple(q.shape)} max_seqlen_q={mq} bs={bs} "
+              f"页数={P} K池={tuple(k.shape)} {k.dtype} → 临时 bf16 {tuple(kd.shape)} "
+              f"capturing={torch.cuda.is_current_stream_capturing()} pid={os.getpid()}", flush=True)
+    kw2 = dict(kw)
+    kw2["q"], kw2["k"], kw2["v"], kw2["block_table"] = q, kd, vd, nbt
+    return orig(*args[3:], **kw2) if len(args) > 3 else orig(**kw2)
 
-    mod.vllm_flash_attn_varlen_func_interface = wrapped
 
-    # ── 草稿步（q=1）走的是另一个入口 vllm_flash_attn_with_kvcache，必须一并替换，
-    # 否则草稿用厂商内核、验证用自写内核，两边数值不一致会把接受长度打下来
-    # （实测 3.03 → 2.45，见记忆 spec-decode-needs-matched-kernels）。
-    orig_kv = getattr(mod, "vllm_flash_attn_with_kvcache_interface", None)
-    if orig_kv is not None:
-        def wrapped_kv(*a, **kw):
-            k = kw.get("k_cache")
-            bt = kw.get("block_table")
-            q = kw.get("q")
-            if _TRACE and q is not None and len(_route_seen) < 12 and not torch.cuda.is_current_stream_capturing() and kw.get("cache_seqlens") is not None and int(kw["cache_seqlens"][0]) > 10000:
-                key = ("kv", tuple(q.shape), None if k is None else str(k.dtype))
-                if key not in _route_seen:
-                    _route_seen.add(key)
-                    print(f"[fp8_kv_hcu][route] with_kvcache: q={tuple(q.shape)} K={None if k is None else tuple(k.shape)} {None if k is None else k.dtype} "
-                          f"cache_seqlens[:2]={kw.get('cache_seqlens')[:2].tolist() if kw.get('cache_seqlens') is not None else None} pid={os.getpid()}", flush=True)
-            if (not _OWN) or k is None or bt is None or q is None or k.dtype not in _FP8:
-                return orig_kv(*a, **kw)
-            # q 形状 [bs, 1, HQ, HD]；只接管 1 个 kv 头 / hd 256 / page 64 的生产形状
-            if q.dim() != 4 or q.shape[1] != 1 or q.shape[2] != 4 or q.shape[3] != 256:
-                return orig_kv(*a, **kw)
-            if k.dim() != 4 or k.shape[1] != 1 or k.shape[2] != 64 or k.shape[3] != 256:
-                return orig_kv(*a, **kw)
-            cs = kw.get("cache_seqlens")
-            if cs is None or kw.get("return_softmax_lse"):
-                return orig_kv(*a, **kw)
-            pa = _load_pa(1)
-            if pa is None:
-                return orig_kv(*a, **kw)
-            try:
-                import torch as _t
-                bs = q.shape[0]
-                out = _t.empty_like(q)
-                pa(out.view(bs, 1, 4, 256), q.view(bs, 1, 4, 256), k, kw.get("v_cache"),
-                   bt.to(_t.int32), cs.to(_t.int32), int(bt.shape[1]), float(kw.get("softmax_scale")))
-                if not _seen["own_kv"]:
-                    _seen["own_kv"] = True
-                    print(f"[fp8_kv_hcu] ✅ 首次真正生效(草稿步 q=1 自写内核 {_OWN_FMT}): q={tuple(q.shape)} "
-                          f"bs={bs} 页表宽 {bt.shape[1]} capturing={_t.cuda.is_current_stream_capturing()} "
-                          f"pid={os.getpid()}", flush=True)
-                return out
-            except Exception as e:
-                if not _seen["own_kv_err"]:
-                    _seen["own_kv_err"] = True
-                    print(f"[fp8_kv_hcu] ⚠ 草稿步自写内核异常，回退厂商: {type(e).__name__}: {e}", flush=True)
-                return orig_kv(*a, **kw)
-
-        mod.vllm_flash_attn_with_kvcache_interface = wrapped_kv
-        print(f"[fp8_kv_hcu] 已安装草稿步(q=1)替换 pid={os.getpid()}", flush=True)
-    else:
-        print("[fp8_kv_hcu] ⚠ 未找到 vllm_flash_attn_with_kvcache_interface，草稿步仍走厂商", flush=True)
-
-    mod._fp8_kv_hcu_installed = True
-    print(f"[fp8_kv_hcu] 已安装到 {mod.__name__}（预填充 fp8→bf16 反量化） pid={os.getpid()}", flush=True)
+def dispatch_with_kvcache(orig_kv, *a, **kw):
+    def fallback(*args, **kwargs):
+        cache = kwargs.get("k_cache")
+        if cache is not None and cache.dtype == torch.float8_e4m3fn and kwargs.get("block_table") is not None:
+            raise RuntimeError("Paged e4m3 draft attention requires a compatible PA kernel")
+        return orig_kv(*args, **kwargs)
+    k = kw.get("k_cache")
+    bt = kw.get("block_table")
+    q = kw.get("q")
+    if _TRACE and q is not None and len(_route_seen) < 12 and not torch.cuda.is_current_stream_capturing() and kw.get("cache_seqlens") is not None and int(kw["cache_seqlens"][0]) > 10000:
+        key = ("kv", tuple(q.shape), None if k is None else str(k.dtype))
+        if key not in _route_seen:
+            _route_seen.add(key)
+            print(f"[fp8_kv_hcu][route] with_kvcache: q={tuple(q.shape)} K={None if k is None else tuple(k.shape)} {None if k is None else k.dtype} "
+                  f"cache_seqlens[:2]={kw.get('cache_seqlens')[:2].tolist() if kw.get('cache_seqlens') is not None else None} pid={os.getpid()}", flush=True)
+    if (not _OWN) or k is None or bt is None or q is None or k.dtype not in _FP8:
+        return fallback(*a, **kw)
+    # q 形状 [bs, 1, HQ, HD]；只接管 1 个 kv 头 / hd 256 / page 64 的生产形状
+    if q.dim() != 4 or q.shape[1] != 1 or q.shape[2] != 4 or q.shape[3] != 256:
+        return fallback(*a, **kw)
+    if k.dim() != 4 or k.shape[1] != 1 or k.shape[2] != 64 or k.shape[3] != 256:
+        return fallback(*a, **kw)
+    cs = kw.get("cache_seqlens")
+    if cs is None or kw.get("return_softmax_lse"):
+        return fallback(*a, **kw)
+    pa = _load_pa(1)
+    if pa is None:
+        return fallback(*a, **kw)
+    try:
+        import torch as _t
+        bs = q.shape[0]
+        out = _t.empty_like(q)
+        pa(out.view(bs, 1, 4, 256), q.view(bs, 1, 4, 256), k, kw.get("v_cache"),
+           bt.to(_t.int32), cs.to(_t.int32), int(bt.shape[1]), float(kw.get("softmax_scale")))
+        if not _seen["own_kv"]:
+            _seen["own_kv"] = True
+            print(f"[fp8_kv_hcu] ✅ 首次真正生效(草稿步 q=1 自写内核 {_OWN_FMT}): q={tuple(q.shape)} "
+                  f"bs={bs} 页表宽 {bt.shape[1]} capturing={_t.cuda.is_current_stream_capturing()} "
+                  f"pid={os.getpid()}", flush=True)
+        return out
+    except Exception as e:
+        if not _seen["own_kv_err"]:
+            _seen["own_kv_err"] = True
+            print(f"[fp8_kv_hcu] ⚠ 草稿步自写内核异常，回退厂商: {type(e).__name__}: {e}", flush=True)
+        return fallback(*a, **kw)
 
 
 def _preflight_kernels():
@@ -463,15 +418,7 @@ def _preflight_kernels():
     print(msg + "\n           KV 为 e5m2，将回退厂商内核（结果正确，但长上下文更慢）。", flush=True)
 
 
-def install(mod):
-    if not _ON:
-        return
-    if not _seen.get("preflight"):
-        _seen["preflight"] = True
-        _preflight_kernels()
-    if mod.__name__.endswith("srt.server_args"):
-        _install_server_args(mod)
-    elif mod.__name__.endswith("arg_groups.overrides"):
-        _install_overrides(mod)
-    elif mod.__name__.endswith("flashattention_interface"):
-        _install_interface(mod)
+def validate_e4m3_pa():
+    if not _OWN or _OWN_FMT != "e4m3":
+        raise ValueError("Paged e4m3 KV requires SGLANG_PA_OWN=1 and SGLANG_PA_FMT=e4m3")
+    _preflight_kernels()

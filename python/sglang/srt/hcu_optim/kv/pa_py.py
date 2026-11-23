@@ -12,7 +12,12 @@ except ImportError:                     # 直接以脚本方式运行（离线�
 class PagedAttn:
     """一次构造、多次调用；工作区显存预分配，便于在 CUDA graph 内复用。"""
     def __init__(self, fmt="e4m3", libdir=LIBDIR, sq=4):
-        cand = [f"libpa_{fmt}_q{sq}.so", f"libpa_{fmt}.so"]   # 新命名优先，回退旧名
+        if fmt not in ("e4m3", "e5m2") or sq not in (1, 4):
+            raise ValueError(f"Unsupported PA configuration: fmt={fmt!r}, sq={sq}")
+        cand = [f"libpa_{fmt}_q{sq}.so"]
+        if sq == 4:
+            # Legacy libraries use the four-query ABI.
+            cand.append(f"libpa_{fmt}.so")
         for c in cand:
             fp = os.path.join(libdir, c)
             if os.path.exists(fp):

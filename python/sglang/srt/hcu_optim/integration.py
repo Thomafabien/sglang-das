@@ -21,12 +21,6 @@ logger = logging.getLogger(__name__)
 # Every switch is opt-in.  Secondary tuning variables are documented in the
 # implementation module and in k100opt/SOURCE_INTEGRATION.md.
 TARGETS = {
-    "sglang.srt.arg_groups.overrides": (
-        ("sglang.srt.hcu_optim.kv.fp8_kv_hcu", "SGLANG_FP8_KV_HCU"),
-    ),
-    "sglang.srt.layers.attention.flashattention_interface": (
-        ("sglang.srt.hcu_optim.kv.fp8_kv_hcu", "SGLANG_FP8_KV_HCU"),
-    ),
     "sglang.srt.layers.moe.moe_runner.triton_utils.moe_align_block_size": (
         ("sglang.srt.hcu_optim.ops.lightop_compat", "SGLANG_LIGHTOP_COMPAT"),
     ),
@@ -46,7 +40,6 @@ TARGETS = {
     ),
     "sglang.srt.server_args": (
         ("sglang.srt.hcu_optim.infra.server_defaults", "SGLANG_SERVER_DEFAULTS"),
-        ("sglang.srt.hcu_optim.kv.fp8_kv_hcu", "SGLANG_FP8_KV_HCU"),
     ),
     "sglang.srt.managers.scheduler": (
         ("sglang.srt.hcu_optim.sched.first_token_first", "SGLANG_FIRST_TOKEN_FIRST"),

@@ -5061,6 +5061,15 @@ class ServerArgs:
         if self.kv_cache_dtype in allowed_dtypes:
             return
 
+        if self.kv_cache_dtype == "fp8_e4m3" and backend == "fa3":
+            from sglang.srt.hcu_optim.integration import is_enabled
+
+            if is_enabled("SGLANG_FP8_KV_HCU"):
+                from sglang.srt.hcu_optim.kv.fp8_kv_hcu import validate_e4m3_pa
+
+                validate_e4m3_pa()
+                return
+
         if self.kv_cache_dtype == "fp8_e4m3":
             raise ValueError(
                 f"HCU {label} '{backend}' does not support "

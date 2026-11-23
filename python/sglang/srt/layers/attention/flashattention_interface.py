@@ -25,6 +25,7 @@ from sglang.srt.utils import is_hcu
 from sglang.srt.utils.common import get_bool_env_var
 _use_triton_vllm_fa = get_bool_env_var("SGLANG_USE_TRITON_VLLM_FA")
 _is_hcu = is_hcu()
+_use_hcu_fp8_kv = _is_hcu and get_bool_env_var("SGLANG_FP8_KV_HCU")
 
 if _is_hcu and _use_triton_vllm_fa:
     from sglang.srt.layers.attention.triton_vllm_flash_attn import (
@@ -150,7 +151,14 @@ def vllm_flash_attn_with_kvcache(
             return_softmax_lse=return_softmax_lse,
         )
     
-    return vllm_flash_attn_with_kvcache_interface(
+    backend = vllm_flash_attn_with_kvcache_interface
+    if _use_hcu_fp8_kv:
+        from functools import partial
+
+        from sglang.srt.hcu_optim.kv.fp8_kv_hcu import dispatch_with_kvcache
+
+        backend = partial(dispatch_with_kvcache, backend)
+    return backend(
             q=q,
             k_cache=k_cache,
             v_cache=v_cache,
@@ -284,7 +292,14 @@ def vllm_flash_attn_varlen_func(
             v_descale=v_descale,
         )
 
-    return vllm_flash_attn_varlen_func_interface(
+    backend = vllm_flash_attn_varlen_func_interface
+    if _use_hcu_fp8_kv:
+        from functools import partial
+
+        from sglang.srt.hcu_optim.kv.fp8_kv_hcu import dispatch_varlen
+
+        backend = partial(dispatch_varlen, backend)
+    return backend(
         q=q,
         k=k,
         v=v,
