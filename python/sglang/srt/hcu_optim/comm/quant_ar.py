@@ -21,16 +21,18 @@
 """
 import os
 
+from sglang.srt.environ import envs
+
 import torch
 import torch.distributed as dist
 import triton
 import triton.language as tl
 
-_G = int(os.environ.get("SGLANG_QAR_GROUP", "32"))   # 缺省 32：128 在超长上下文下接受长度下降 10%–32%
-_MIN_NUMEL = int(os.environ.get("SGLANG_QAR_MIN_NUMEL", str(2048 * 2048)))
-_OFF_FILE = os.environ.get("SGLANG_QAR_OFF_FILE", "/tmp/qar_off")
-_IN_GRAPH = int(os.environ.get("SGLANG_QAR_IN_GRAPH", "1"))     # 0 = 图内与 pynccl 上下文保持原路径
-_CFG_FILE = os.environ.get("SGLANG_QAR_CFG_FILE", "/tmp/qar_cfg.json")
+_G = envs.SGLANG_QAR_GROUP.get()   # 缺省 32：128 在超长上下文下接受长度下降 10%–32%
+_MIN_NUMEL = envs.SGLANG_QAR_MIN_NUMEL.get()
+_OFF_FILE = envs.SGLANG_QAR_OFF_FILE.get()
+_IN_GRAPH = envs.SGLANG_QAR_IN_GRAPH.get()     # 0 = 图内与 pynccl 上下文保持原路径
+_CFG_FILE = envs.SGLANG_QAR_CFG_FILE.get()
 _st = {"logged": False, "n_q": 0, "n_orig": 0, "cfg_mtime": None, "dbg_n": 0}
 try:
     from ..sched import pair_prefill as _PP
@@ -73,7 +75,7 @@ def _debug_compare(self, x, orig):
     rowrel = (d.norm(dim=1) / (ref.float().norm(dim=1) + 1e-12))
     _st["dbg_n"] += 1
     if self.rank_in_group == 0:
-        with open(os.environ.get("SGLANG_QAR_ERR_LOG", "/workspace/sx/qar/err.log"), "a") as f:
+        with open(envs.SGLANG_QAR_ERR_LOG.get(), "a") as f:
             f.write(f"{_st['dbg_tag']} n={_st['dbg_n']} T={x.shape[0]} G={_G} rel={rel:.4e} row_med={rowrel.median().item():.4e} "
                     f"row_max={rowrel.max().item():.4e} peak_over_rms={ratio:.2f} part_amax={part_amax:.3e}\n")
     return y
@@ -226,49 +228,3 @@ def dispatch_all_reduce(group, tensor, original):
     finally:
         if handoff:
             _PP.after_ar()
-
-
-def install(mod):
-    GC = getattr(mod, "GroupCoordinator", None)
-    if GC is None or getattr(GC, "_quant_ar_installed", False):
-        return
-    orig = GC.all_reduce
-
-    def all_reduce(self, input_):
-        # 成对预填充（pair_prefill）在目标模型前向的每次 all_reduce 处交接控制权
-        if _PP is not None and _PP.ENABLED and _PP.in_handoff():
-            _PP.before_ar()
-            out = _ar_impl(self, input_)
-            _PP.after_ar()
-            return out
-        return _ar_impl(self, input_)
-
-    def _ar_impl(self, input_):
-        _refresh_cfg()
-        pc = getattr(self, "pynccl_comm", None)
-        pc = pc if (pc is not None and not pc.disabled) else None      # 图捕获上下文里框架会把它置为可用
-        in_graph = torch.cuda.is_current_stream_capturing()
-        if _IN_GRAPH == 0 and (in_graph or pc is not None):
-            return orig(self, input_)
-        if in_graph and pc is None:
-            return orig(self, input_)
-        if _eligible(self, input_) and not os.path.exists(_OFF_FILE):
-            if pc is not None:
-                if not _st.get("logged_graph"):
-                    _st["logged_graph"] = True
-                    print(f"[quant_ar] ✅ 图内路径首次真正生效：{tuple(input_.shape)}（pynccl，捕获中={in_graph}，rank {self.rank_in_group}）", flush=True)
-                return quant_all_reduce_(input_, self.device_group, self.rank_in_group, self.world_size, pc=pc)
-            if _st.get("dbg_left", 0) > 0:
-                _st["dbg_left"] -= 1
-                return _debug_compare(self, input_, orig)
-            _st["n_q"] += 1
-            if not _st["logged"]:
-                _st["logged"] = True
-                print(f"[quant_ar] ✅ 首次真正生效：{tuple(input_.shape)} bf16 → int8 分组 {_G} 量化路径"
-                      f"（组 {self.unique_name}，rank {self.rank_in_group}）", flush=True)
-            return quant_all_reduce_(input_, self.device_group, self.rank_in_group, self.world_size)
-        return orig(self, input_)
-
-    GC.all_reduce = all_reduce
-    GC._quant_ar_installed = True
-    print(f"[quant_ar] 已安装：阈值 numel≥{_MIN_NUMEL}，分组 {_G}，关闭文件 {_OFF_FILE}", flush=True)

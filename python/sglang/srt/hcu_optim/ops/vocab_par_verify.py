@@ -41,9 +41,9 @@ def _eligible(proc, lm_head):
         W, rank = get_tp_group().world_size, get_tp_group().rank_in_group
         width = si.num_elements_padded
         algo = str(sa.speculative_algorithm).upper().split(".")[-1]
-        from sglang.srt.utils import get_bool_env_var
+        from sglang.srt.environ import envs
 
-        if not get_bool_env_var("SGLANG_VPA_VERIFY"): why = "SGLANG_VPA_VERIFY is disabled"
+        if not envs.SGLANG_VPA_VERIFY.get(): why = "SGLANG_VPA_VERIFY is disabled"
         elif algo not in ("EAGLE", "NEXTN"): why = f"算法 {algo} 不在白名单（只接管 EAGLEWorkerV2.verify）"
         elif getattr(sa, "enable_multi_layer_eagle", False): why = "multi-layer EAGLE 走另一个 worker"
         elif W & (W - 1) != 0: why = f"TP={W} 不是 2 的幂（合并核 tl.arange 要求）"

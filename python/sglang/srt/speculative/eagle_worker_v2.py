@@ -22,7 +22,6 @@ import torch
 
 from sglang.kernels.ops.speculative.eagle import fill_bonus_tokens_func
 from sglang.srt.environ import envs
-from sglang.srt.utils import get_bool_env_var
 from sglang.srt.hardware_backend.npu.graph_runner.eagle_draft_extend_npu_graph_runner import (
     EAGLEDraftExtendNpuGraphRunner,
 )
@@ -128,9 +127,9 @@ from sglang.srt.utils.common import (
 from sglang.srt.utils.patch_torch import monkey_patch_torch_reductions
 
 _is_cpu = is_cpu()
-_enable_fused_draft_topk = get_bool_env_var("SGLANG_FUSED_DRAFT_TOPK")
-_enable_vocab_par_draft = get_bool_env_var("SGLANG_VPA_DRAFT")
-_enable_vocab_par_verify = get_bool_env_var("SGLANG_VPA_VERIFY")
+_enable_fused_draft_topk = envs.SGLANG_FUSED_DRAFT_TOPK.get()
+_enable_vocab_par_draft = envs.SGLANG_VPA_DRAFT.get()
+_enable_vocab_par_verify = envs.SGLANG_VPA_VERIFY.get()
 
 
 def _sample_verify(verify_input, batch, logits_output, vocab_mask):

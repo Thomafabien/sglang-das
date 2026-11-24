@@ -5061,9 +5061,7 @@ class ServerArgs:
             return
 
         if self.kv_cache_dtype == "fp8_e4m3" and backend == "fa3":
-            from sglang.srt.hcu_optim.integration import is_enabled
-
-            if is_enabled("SGLANG_FP8_KV_HCU"):
+            if envs.SGLANG_FP8_KV_HCU.get():
                 from sglang.srt.hcu_optim.kv.fp8_kv_hcu import validate_e4m3_pa
 
                 validate_e4m3_pa()

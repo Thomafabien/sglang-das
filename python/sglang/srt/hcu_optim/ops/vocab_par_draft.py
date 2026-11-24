@@ -13,7 +13,7 @@
 import os
 import torch, triton, triton.language as tl
 
-from sglang.srt.utils import get_bool_env_var
+from sglang.srt.environ import envs
 
 _STATE = {"eagle_hooked": False, "local_w": None, "full_w": None, "first": False}
 
@@ -123,7 +123,7 @@ def _eligible(proc, lm_head):
         W, rank = get_tp_group().world_size, get_tp_group().rank_in_group
         width = si.num_elements_padded
         algo = str(sa.speculative_algorithm).upper().split(".")[-1]
-        if not get_bool_env_var("SGLANG_FUSED_DRAFT_TOPK"): why = "需 SGLANG_FUSED_DRAFT_TOPK=1"
+        if not envs.SGLANG_FUSED_DRAFT_TOPK.get(): why = "需 SGLANG_FUSED_DRAFT_TOPK=1"
         elif torch.version.hip is None: why = "非 HIP（CUDA 路径在本卡分片上直接 argmax）"
         elif algo not in ("EAGLE", "NEXTN"): why = f"算法 {algo} 不在白名单"
         elif getattr(sa, "enable_multi_layer_eagle", False): why = "multi-layer EAGLE"

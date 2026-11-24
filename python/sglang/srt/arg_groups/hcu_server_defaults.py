@@ -10,6 +10,8 @@
 """
 import os
 
+from sglang.srt.environ import envs
+
 _BUCKETS = "4 8 16 32 64 128 256 512 768 1024 1088 1536 2048 2112 2176 2240 2304 2368 2432".split()
 _MUST_ENV = {"GPU_MAX_HW_QUEUES": "2", "SGLANG_QUANT_AR": "1", "SGLANG_FIRST_TOKEN_FIRST": "3",
              "PYTORCH_TUNABLEOP_ENABLED": "1", "SGLANG_USE_AITER_LINEAR_ATTN": "1",
@@ -126,7 +128,7 @@ def apply_server_defaults(argv):
     if not has("--cuda-graph-bs-prefill"):
         add("--cuda-graph-bs-prefill", *_BUCKETS)
     if not has("--kv-cache-dtype"):
-        add("--kv-cache-dtype", "fp8_e4m3" if os.environ.get("SGLANG_FP8_KV_HCU", "0") != "0" else "auto")
+        add("--kv-cache-dtype", "fp8_e4m3" if envs.SGLANG_FP8_KV_HCU.get() else "auto")
     if not has("--numa-node") and _tp(argv) == 4 and _numa_nodes() == 4:
         add("--numa-node", "0", "1", "2", "3")
     try:

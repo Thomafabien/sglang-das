@@ -12,6 +12,7 @@ from sglang.kernels.ops.attention.rotary_triton import (
     triton_ernie45_rope_fused_inplace,
     triton_mrope_fused,
 )
+from sglang.srt.environ import envs
 from sglang.srt.layers.rotary_embedding.base import RotaryEmbedding
 from sglang.srt.layers.rotary_embedding.utils import apply_rotary_emb
 from sglang.srt.layers.rotary_embedding.yarn import (
@@ -22,7 +23,6 @@ from sglang.srt.layers.rotary_embedding.yarn import (
 from sglang.srt.runtime_context import get_server_args
 from sglang.srt.utils import (
     cpu_has_amx_support,
-    get_bool_env_var,
     is_cuda,
     is_npu,
     is_xpu,
@@ -247,7 +247,7 @@ class MRotaryEmbedding(RotaryEmbedding):
         if positions.ndim == 2 and self.mrope_section:
             return self.forward_triton(positions, query, key)
         if (
-            get_bool_env_var("SGLANG_MTP_ROPE_TRITON")
+            envs.SGLANG_MTP_ROPE_TRITON.get()
             and positions.ndim == 1
             and self.mrope_section
             and fused_set_kv_buffer_arg is None

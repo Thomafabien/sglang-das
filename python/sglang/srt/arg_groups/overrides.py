@@ -1787,10 +1787,9 @@ def _cutedsl_prefill_backend_fill(view: Any) -> dict:
 @register_post_process
 def _attention_backend_fa3_fp8_fallback(view: Any) -> dict:
     if view.attention_backend == "fa3" and view.kv_cache_dtype == "fp8_e5m2":
-        from sglang.srt.hcu_optim.integration import is_enabled
         from sglang.srt.utils import is_hcu
 
-        if is_hcu() and is_enabled("SGLANG_FP8_KV_HCU"):
+        if is_hcu() and envs.SGLANG_FP8_KV_HCU.get():
             return {}
         logger.warning(
             "FlashAttention3 only supports fp8_e4m3 if using FP8; "

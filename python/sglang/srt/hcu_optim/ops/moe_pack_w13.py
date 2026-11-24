@@ -17,7 +17,6 @@
 开关：SGLANG_MOE_PACK_W13=1 开（默认关，只在风冷上开）。不满足条件的层（带偏置、非 bf16、形状不整除）不打包并打印原因；
 量化、TMA、融合写回等本内核不支持的调用一律报错而不是静默回退——权重已打包，回退原内核会算错。
 """
-import os
 import torch, triton, triton.language as tl
 
 from sglang.srt.environ import envs
@@ -25,7 +24,6 @@ from sglang.srt.environ import envs
 _enabled = envs.SGLANG_MOE_PACK_W13.get()
 BN, BK = 32, 128
 _REG = {}                 # data_ptr -> (BN, BK)
-_seen = {"pack": 0, "run": False}
 
 
 @triton.jit
@@ -107,7 +105,6 @@ def pack_w13_if_supported(layer) -> bool:
     packed = _pack(w.data)
     w.data.copy_(packed)
     _REG[w.data_ptr()] = (BN, BK)
-    _seen["pack"] += 1
     return True
 
 
@@ -165,79 +162,3 @@ def run_packed_w13_if_registered(
         num_warps=cfg.get("num_warps", 4), num_stages=cfg.get("num_stages", 2),
     )
     return True
-
-
-def _install_pack(mod):
-    cls = mod.UnquantizedFusedMoEMethod
-    orig = cls.process_weights_after_loading
-
-    def process_weights_after_loading(self, layer):
-        orig(self, layer)
-        w = getattr(layer, "w13_weight", None)
-        why = None
-        if w is None or w.dim() != 3: why = "无 3 维 w13_weight"
-        elif w.dtype != torch.bfloat16: why = f"dtype {w.dtype}"
-        elif w.shape[1] % BN or w.shape[2] % BK: why = f"形状 {tuple(w.shape)} 不整除 {BN}/{BK}"
-        elif getattr(layer, "w13_weight_bias", None) is not None: why = "带偏置"
-        elif not w.is_contiguous(): why = "非连续"
-        if why:
-            print(f"[moe_pack_w13] 跳过一层：{why}", flush=True)
-            return
-        p = _pack(w.data)
-        w.data.copy_(p); del p
-        _REG[w.data_ptr()] = (BN, BK)
-        _seen["pack"] += 1
-        if _seen["pack"] == 1:
-            print(f"[moe_pack_w13] ✅ 首次打包 w13 {tuple(w.shape)} → tile {BN}×{BK} pid={os.getpid()}", flush=True)
-
-    cls.process_weights_after_loading = process_weights_after_loading
-    print(f"[moe_pack_w13] 已安装（权重打包）pid={os.getpid()}", flush=True)
-
-
-def _install_kernel(mod):
-    orig = mod.invoke_fused_moe_kernel
-
-    def invoke(A, B, bias, C, A_scale, B_scale, B_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
-               num_tokens_post_padded, mul_routed_weight, top_k, config, compute_type=None, **kw):
-        if B.data_ptr() not in _REG:
-            return orig(A, B, bias, C, A_scale, B_scale, B_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
-                        num_tokens_post_padded, mul_routed_weight, top_k, config, compute_type=compute_type, **kw)
-        bad = [k for k in ("use_fp8_w8a8", "use_int8_w8a8", "use_int8_w8a16", "use_int4_w4a16", "per_channel_quant",
-                           "a_use_tma", "b_use_tma", "c_sorted", "no_combine", "fuse_sum_all_reduce",
-                           "fuse_add_to_output", "mask_output", "lora_preserve_base") if kw.get(k)]
-        if bias is not None: bad.append("bias")
-        if kw.get("block_shape") is not None: bad.append("block_shape")
-        if bad:
-            raise RuntimeError(f"[moe_pack_w13] 打包权重遇到不支持的调用 {bad}（不可回退原内核，会算错）")
-        pbn, pbk = _REG[B.data_ptr()]
-        N, K = B.shape[1], B.shape[2]
-        cfg = dict(config); bn, bk = cfg["BLOCK_SIZE_N"], cfg["BLOCK_SIZE_K"]
-        if bn % pbn or N % bn: bn = pbn          # 表里的 BN/BK 不是打包块整数倍时退到打包块本身
-        if bk % pbk or K % bk: bk = pbk
-        cfg["BLOCK_SIZE_N"], cfg["BLOCK_SIZE_K"] = bn, bk
-        grid = (triton.cdiv(sorted_token_ids.shape[0], cfg["BLOCK_SIZE_M"]) * triton.cdiv(N, bn),)
-        _w13_packed_kernel[grid](
-            A, B, C, topk_weights, sorted_token_ids, expert_ids, num_tokens_post_padded,
-            N, K, sorted_token_ids.shape[0], topk_ids.numel(),
-            A.stride(0), A.stride(1), B.stride(0), C.stride(-2), C.stride(-1),
-            BLOCK_SIZE_M=cfg["BLOCK_SIZE_M"], BLOCK_SIZE_N=bn, BLOCK_SIZE_K=bk, GROUP_SIZE_M=cfg.get("GROUP_SIZE_M", 1),
-            top_k=top_k, even_Ks=(K % bk == 0), PBN=pbn, PBK=pbk, MUL_ROUTED_WEIGHT=bool(mul_routed_weight),
-            compute_type=compute_type if compute_type is not None else tl.bfloat16,
-            num_warps=cfg.get("num_warps", 4), num_stages=cfg.get("num_stages", 2))
-        if not _seen["run"]:
-            _seen["run"] = True
-            print(f"[moe_pack_w13] ✅ 首次真正生效：A {tuple(A.shape)} B {tuple(B.shape)} 配置 BM{cfg['BLOCK_SIZE_M']} "
-                  f"BN{bn} BK{bk} w{cfg.get('num_warps')} capturing={torch.cuda.is_current_stream_capturing()} pid={os.getpid()}", flush=True)
-
-    mod.invoke_fused_moe_kernel = invoke
-    print(f"[moe_pack_w13] 已安装（内核替换）pid={os.getpid()}", flush=True)
-
-
-def install(mod):
-    if not _enabled or getattr(mod, "_moe_pack_w13_installed", False):
-        return
-    mod._moe_pack_w13_installed = True
-    if hasattr(mod, "UnquantizedFusedMoEMethod"):
-        _install_pack(mod)
-    if hasattr(mod, "invoke_fused_moe_kernel"):
-        _install_kernel(mod)

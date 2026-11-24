@@ -6,7 +6,6 @@
 
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 
-import os
 from typing import Optional, Tuple
 
 import torch
@@ -23,21 +22,21 @@ from sglang.srt.layers.attention.fla.utils import (
     is_nvidia_hopper,
 )
 
+from sglang.srt.environ import envs
+from sglang.srt.utils import is_hcu
+
 NUM_WARPS = [2, 4] if is_nvidia_hopper else [2, 4, 8, 16]
 CHUNK_SIZE = 64
-GDN_CHUNK_H_BV = int(os.getenv("SGLANG_GDN_CHUNK_H_BV", "32"))
-GDN_CHUNK_H_NUM_WARPS = int(os.getenv("SGLANG_GDN_CHUNK_H_NUM_WARPS", "4"))
-GDN_CHUNK_H_NUM_STAGES = int(os.getenv("SGLANG_GDN_CHUNK_H_NUM_STAGES", "2"))
-
-from sglang.srt.environ import envs
-from sglang.srt.utils import get_bool_env_var, is_hcu
+GDN_CHUNK_H_BV = envs.SGLANG_GDN_CHUNK_H_BV.get()
+GDN_CHUNK_H_NUM_WARPS = envs.SGLANG_GDN_CHUNK_H_NUM_WARPS.get()
+GDN_CHUNK_H_NUM_STAGES = envs.SGLANG_GDN_CHUNK_H_NUM_STAGES.get()
 
 _is_hcu = is_hcu()
-_use_prefill_aiter_linear_attn = get_bool_env_var("SGLANG_USE_AITER_LINEAR_ATTN")
+_use_prefill_aiter_linear_attn = envs.SGLANG_USE_AITER_LINEAR_ATTN.get()
 _enable_aiter_chunk_h_config = envs.SGLANG_CHUNK_H_CFG.get()
-_aiter_chunk_h_bv = int(os.getenv("SGLANG_CHUNK_H_BV", "16"))
-_aiter_chunk_h_num_warps = int(os.getenv("SGLANG_CHUNK_H_WARPS", "4"))
-_aiter_chunk_h_num_stages = int(os.getenv("SGLANG_CHUNK_H_STAGES", "2"))
+_aiter_chunk_h_bv = envs.SGLANG_CHUNK_H_BV.get()
+_aiter_chunk_h_num_warps = envs.SGLANG_CHUNK_H_WARPS.get()
+_aiter_chunk_h_num_stages = envs.SGLANG_CHUNK_H_STAGES.get()
 
 _AITER_CHUNK_H_VALIDATED_SHAPE = (128, 128, 64, 8)
 

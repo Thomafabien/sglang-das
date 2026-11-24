@@ -21,11 +21,12 @@ from flash_attn import (
     vllm_flash_attn_with_kvcache as vllm_flash_attn_with_kvcache_interface,
 )
 from typing import Optional, Union
+from sglang.srt.environ import envs
 from sglang.srt.utils import is_hcu
 from sglang.srt.utils.common import get_bool_env_var
 _use_triton_vllm_fa = get_bool_env_var("SGLANG_USE_TRITON_VLLM_FA")
 _is_hcu = is_hcu()
-_use_hcu_fp8_kv = _is_hcu and get_bool_env_var("SGLANG_FP8_KV_HCU")
+_use_hcu_fp8_kv = _is_hcu and envs.SGLANG_FP8_KV_HCU.get()
 
 if _is_hcu and _use_triton_vllm_fa:
     from sglang.srt.layers.attention.triton_vllm_flash_attn import (

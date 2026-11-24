@@ -70,35 +70,3 @@ def fused_max_prob(logits: torch.Tensor):
     _stage1[(M, S)](logits, pm, ps, pi, V, logits.stride(0), S, 2048, num_warps=8)
     _stage2[(M,)](pm, ps, pi, po, io, S, num_warps=1)
     return po.view(M, 1), io.view(M, 1)
-
-class _Lazy:
-    """占位: 不真的算 softmax, 等 fast_topk 来了一次算完"""
-    __slots__ = ("logits",)
-    def __init__(self, logits): self.logits = logits
-
-def install(mod):
-    if getattr(mod, "_fused_draft_topk_installed", False):
-        return
-    orig_renorm = mod.renorm_draft_probs
-    orig_topk = mod.fast_topk
-
-    def renorm(next_token_logits, sampling_info, use_rejection_sampling):
-        if (not use_rejection_sampling and next_token_logits is not None
-                and next_token_logits.dim() == 2 and next_token_logits.is_cuda
-                and next_token_logits.dtype == torch.float32
-                and next_token_logits.size(0) > 0):
-            return _Lazy(next_token_logits)
-        return orig_renorm(next_token_logits, sampling_info, use_rejection_sampling)
-
-    def ftopk(values, topk, dim):
-        if isinstance(values, _Lazy):
-            if topk == 1:
-                return fused_max_prob(values.logits)
-            return orig_topk(orig_renorm(values.logits, None, False), topk, dim)
-        return orig_topk(values, topk, dim)
-
-    mod.renorm_draft_probs = renorm
-    mod.fast_topk = ftopk
-    mod._fused_draft_topk_installed = True
-    import os
-    print(f"[fused_draft_topk] 已安装到 {mod.__name__} (pid={os.getpid()})", flush=True)

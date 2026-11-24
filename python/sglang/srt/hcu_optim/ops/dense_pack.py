@@ -10,7 +10,6 @@
       apply 时 M 落在该形状的区间内、无偏置、bf16 → 走打包内核（直接写 bf16），否则原路径。
 代价：每卡多占白名单层权重大小的显存（约 0.5 GB）；数值与 rocBLAS 不逐位相同（fp32 累加、顺序不同），须看 accept 与精度抽查。
 开关：SGLANG_DENSE_PACK=1 开（默认关）。"""
-import os
 import torch, triton, triton.language as tl
 
 from sglang.srt.environ import envs
@@ -19,7 +18,6 @@ _enabled = envs.SGLANG_DENSE_PACK.get()
 PBN, PBK = 32, 128
 # (N, K) → (M 下限, M 上限)
 _WHITE = {(3072, 2048): (8, 64), (2560, 2048): (8, 64), (2048, 1024): (8, 64), (2048, 4096): (8, 32)}
-_seen = {"pack": 0, "run": False, "bytes": 0}
 
 
 @triton.jit
@@ -90,40 +88,3 @@ def _run(x2, wp, N, K):
     _dense_packed_kernel[(N // BN,)](x2, wp, y, M, N, K, x2.stride(0), y.stride(0),
                                      BM=max(16, triton.next_power_of_2(M)), BN=BN, BK=BK, PBN_=PBN, PBK_=PBK, num_warps=nw)
     return y
-
-
-def install(mod):
-    if not _enabled or getattr(mod, "_dense_pack_installed", False) or not hasattr(mod, "UnquantizedLinearMethod"):
-        return
-    mod._dense_pack_installed = True
-    cls = mod.UnquantizedLinearMethod
-    orig_pw, orig_apply = cls.process_weights_after_loading, cls.apply
-
-    def process_weights_after_loading(self, layer):
-        orig_pw(self, layer)
-        w = getattr(layer, "weight", None)
-        if w is None or w.dim() != 2 or w.dtype != torch.bfloat16 or tuple(w.shape) not in _WHITE or not w.is_contiguous():
-            return
-        layer._dp_packed = _pack(w.data); layer._dp_range = _WHITE[tuple(w.shape)]
-        _seen["pack"] += 1; _seen["bytes"] += w.numel() * 2
-        if _seen["pack"] in (1, 40, 80):
-            print(f"[dense_pack] 已打包 {_seen['pack']} 层（本层 {tuple(w.shape)}，累计额外显存 {_seen['bytes']/2**20:.0f} MiB） pid={os.getpid()}", flush=True)
-
-    def apply(self, layer, x, bias=None, *a, **kw):
-        wp = getattr(layer, "_dp_packed", None)
-        if wp is not None and bias is None and not a and not kw and x.dtype == torch.bfloat16:
-            K = x.shape[-1]; M = x.numel() // K; lo, hi = layer._dp_range
-            if lo <= M <= hi:
-                x2 = x.reshape(M, K)
-                if x2.stride(-1) == 1:
-                    N = wp.shape[0]
-                    y = _run(x2, wp, N, K)
-                    if not _seen["run"]:
-                        _seen["run"] = True
-                        print(f"[dense_pack] ✅ 首次真正生效：M={M} N={N} K={K} capturing={torch.cuda.is_current_stream_capturing()} pid={os.getpid()}", flush=True)
-                    return y.view(*x.shape[:-1], N)
-        return orig_apply(self, layer, x, bias, *a, **kw)
-
-    cls.process_weights_after_loading = process_weights_after_loading
-    cls.apply = apply
-    print(f"[dense_pack] 已安装：白名单 {_WHITE}（(N,K) → M 区间） pid={os.getpid()}", flush=True)

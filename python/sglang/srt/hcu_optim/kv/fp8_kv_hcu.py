@@ -20,20 +20,21 @@
    纯张量操作、无 .item()/同步，可被 CUDA graph 捕获。代价：每层读 fp8 页 + 写 2 倍字节的 bf16。
 """
 import os, torch
+
+from sglang.srt.environ import envs
 from .. import PATCH_DIR as _PATCH_DIR
 
-_ON = os.environ.get("SGLANG_FP8_KV_HCU", "0") != "0"
 # 自写分页注意力内核（verify 步 q=4）。SGLANG_PA_OWN=1 开启；默认关，开启时才加载 .so。
-_OWN = os.environ.get("SGLANG_PA_OWN", "0") != "0"
-_OWN_FMT = os.environ.get("SGLANG_PA_FMT", "e4m3")      # e4m3（精度 2 倍）或 e5m2（与厂商一致）
-_CHECK = int(os.environ.get("SGLANG_PA_CHECK", "0"))    # >0：前 N 次调用同时跑厂商内核对拍（仅 e5m2 有意义）
+_OWN = envs.SGLANG_PA_OWN.get()
+_OWN_FMT = envs.SGLANG_PA_FMT.get()      # e4m3（精度 2 倍）或 e5m2（与厂商一致）
+_CHECK = envs.SGLANG_PA_CHECK.get()    # >0：前 N 次调用同时跑厂商内核对拍（仅 e5m2 有意义）
 _chk_n = [0]
 _pa = {}            # sq -> PagedAttn 实例，懒加载
 _pa_fail = False
 _FP8 = (torch.float8_e5m2, torch.float8_e4m3fn)
-_TRACE = os.environ.get("SGLANG_PA_TRACE", "0") != "0"
+_TRACE = envs.SGLANG_PA_TRACE.get()
 # 页表结构诊断：默认关。开启会在首个符合条件的 decode 步做一次设备同步（见 _try_own 内的说明）。
-_DIAG_BT = os.environ.get("SGLANG_PA_DIAG_BT", "0") != "0"
+_DIAG_BT = envs.SGLANG_PA_DIAG_BT.get()
 
 
 class _SkipDiag(Exception):
@@ -44,7 +45,7 @@ _seen = {"dequant": False, "direct": False, "own": False, "own_err": False,
 
 # 自写分页 prefill 注意力（读 fp8 KV，装载时解包成 fp16 走 mmac；离线 131072×8192 为厂商 bf16 的 65%）。
 # SGLANG_PP_OWN=1 开启；形状不吻合或调用异常一律回退「反量化→bf16 厂商」路径并打日志。
-_PP_OWN = os.environ.get("SGLANG_PP_OWN", "0") != "0"
+_PP_OWN = envs.SGLANG_PP_OWN.get()
 _pp = {"lib": None, "fail": False}
 _seen.update({"pp": False, "pp_err": False, "pp_fallback": False})
 
@@ -71,7 +72,7 @@ def _load_pp():
 
 # 草稿扩展（每序列 1..4 个新 token、变长）专用：split-KV 的 pa_ext 内核。此前走 prefill 核，grid 只有 bs 个 block，
 # 128k 一次 17 ms（离线实测）；pa_ext 同形状 0.3 ms。SGLANG_PA_EXT=0 可关（回退 prefill 核路径以便 A/B）。
-_EXT_ON = os.environ.get("SGLANG_PA_EXT", "0") != "0"   # 默认关：路由取证证明草稿扩展不经此入口，留作备用
+_EXT_ON = envs.SGLANG_PA_EXT.get()   # 默认关：路由取证证明草稿扩展不经此入口，留作备用
 _ext = {"lib": None, "fail": False, "ws": {}}
 _seen.update({"ext": False, "ext_err": False})
 
